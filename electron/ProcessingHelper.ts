@@ -1,58 +1,85 @@
 import fs from "node:fs"
-import { ScreenshotHelper } from "./ScreenshotHelper"
-import { IProcessingHelperDeps } from "./main"
-import { app, BrowserWindow } from "electron"
-import OpenAI from "openai"
+import path from "node:path"
+import { BrowserWindow } from "electron"
+import { string } from "prop-types"
+interface ScreenshotPayload {
+  path: string
+  data: string
+  mimeType: string
+}
 
-let openai: OpenAI | null = null
+interface ProblemExtractionPayload {
+  problem_statement?: string
+  code_snippet?: string
+}
 
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-mini-2025-04-14"
-const OPENAI_RESPONSE_LANGUAGE = process.env.OPENAI_RESPONSE_LANGUAGE || "Russian"
+interface SolutionPayload {
+  short_answer: string | null
+  code: string
+  thoughts: string[]
+  time_complexity: string
+  space_complexity: string
+}
+
+let genAI: GoogleGenerativeAI | null = null
 
 export class ProcessingHelper {
   private deps: IProcessingHelperDeps
   private screenshotHelper: ScreenshotHelper
+  private jsonModel: GenerativeModel
+  private textModel: GenerativeModel
 
-  // AbortControllers for API requests
   private currentProcessingAbortController: AbortController | null = null
   private currentExtraProcessingAbortController: AbortController | null = null
 
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps
-    this.screenshotHelper = deps.getScreenshotHelper()
 
-    if (!openai) {
-      if (!process.env.OPENAI_API_KEY) {
-        throw new Error("OPENAI_API_KEY environment variable is not set")
-      }
-      openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-        maxRetries: 1,
-        timeout: 60000
+    const helper = deps.getScreenshotHelper()
+    if (!helper) {
+      throw new Error("Screenshot helper is not initialized")
+    }
+    this.screenshotHelper = helper
+
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      console.error("GEMINI_API_KEY is missing from environment variables.")
+      // We will throw or handle this gracefully during generation, 
+      // but for now we can't initialize the client properly without it.
+    }
+
+    if (!genAI && apiKey) {
+      genAI = new GoogleGenerativeAI(apiKey)
+    }
+
+    if (genAI) {
+      this.textModel = genAI.getGenerativeModel({
+        model: GEMINI_MODEL,
+        generationConfig: {
+          temperature: 0.2,
+          topP: 0.95,
+          topK: 32,
+          maxOutputTokens: 2048
+        }
       })
+
+      this.jsonModel = genAI.getGenerativeModel({
+        model: GEMINI_MODEL,
+        generationConfig: {
+          temperature: 0.2,
+          topP: 0.95,
+          topK: 32,
+          maxOutputTokens: 2048,
+          responseMimeType: "application/json"
+        }
+      })
+    } else {
+      // Create dummy models that will fail when called if API key is missing
+      // This prevents the constructor from crashing if the key is missing at startup
+      this.textModel = {} as any
+      this.jsonModel = {} as any
     }
   }
-
-  // Helper function to wrap OpenAI calls with logging
-  private async _callOpenAI(
-    context: string,
-    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
-    options?: OpenAI.RequestOptions
-  ): Promise<OpenAI.Chat.ChatCompletion> {
-    if (!openai) {
-      throw new Error("OpenAI client is not initialized");
-    }
-    console.log(`[OpenAI Request - ${context}] Sending request:`, JSON.stringify(params.messages, null, 2)); // Log request messages
-    try {
-      const response = await openai.chat.completions.create(params, options);
-      console.log(`[OpenAI Response - ${context}] Received response:`, JSON.stringify(response, null, 2)); // Log full response
-      return response;
-    } catch (error: any) {
-      console.error(`[OpenAI Error - ${context}] Request failed:`, JSON.stringify(error, null, 2)); // Log full error
-      throw error; // Re-throw the error to be handled by the caller
-    }
-  }
-
 
   private async waitForInitialization(
     mainWindow: BrowserWindow
@@ -61,9 +88,11 @@ export class ProcessingHelper {
     const maxAttempts = 50 // 5 seconds total
 
     while (attempts < maxAttempts) {
+      if (mainWindow.isDestroyed()) return
       const isInitialized = await mainWindow.webContents.executeJavaScript(
         "window.__IS_INITIALIZED__"
-      )
+      ).catch(() => false)
+
       if (isInitialized) return
       await new Promise((resolve) => setTimeout(resolve, 100))
       attempts++
@@ -71,20 +100,15 @@ export class ProcessingHelper {
     throw new Error("App failed to initialize after 5 seconds")
   }
 
-  private async getCredits(): Promise<number> {
-    // Always return a high number of credits
-    return 999
-  }
-
   private async getLanguage(): Promise<string> {
     const mainWindow = this.deps.getMainWindow()
-    if (!mainWindow) return "python"
+    if (!mainWindow || mainWindow.isDestroyed()) return "python"
 
     try {
       await this.waitForInitialization(mainWindow)
       const language = await mainWindow.webContents.executeJavaScript(
         "window.__LANGUAGE__"
-      )
+      ).catch(() => "python")
 
       if (
         typeof language !== "string" ||
@@ -104,10 +128,16 @@ export class ProcessingHelper {
 
   public async processScreenshots(): Promise<void> {
     const mainWindow = this.deps.getMainWindow()
-    if (!mainWindow) return
+    if (!mainWindow || mainWindow.isDestroyed()) return
 
-    // Credits check is bypassed - we always have enough credits
-    
+    if (!process.env.GEMINI_API_KEY) {
+      mainWindow.webContents.send(
+        this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+        "Gemini API key not found. Please set GEMINI_API_KEY in your .env file."
+      )
+      return
+    }
+
     const view = this.deps.getView()
     console.log("Processing screenshots in view:", view)
 
@@ -126,10 +156,10 @@ export class ProcessingHelper {
         const { signal } = this.currentProcessingAbortController
 
         const screenshots = await Promise.all(
-          screenshotQueue.map(async (path) => ({
-            path,
-            preview: await this.screenshotHelper.getImagePreview(path),
-            data: fs.readFileSync(path).toString("base64")
+          screenshotQueue.map(async (filePath) => ({
+            path: filePath,
+            data: fs.readFileSync(filePath).toString("base64"),
+            mimeType: this.getMimeType(filePath)
           }))
         )
 
@@ -137,21 +167,10 @@ export class ProcessingHelper {
 
         if (!result.success) {
           console.log("Processing failed:", result.error)
-          if (result.error?.includes("API Key out of credits")) {
-            mainWindow.webContents.send(
-              this.deps.PROCESSING_EVENTS.OUT_OF_CREDITS
-            )
-          } else if (result.error?.includes("OpenAI API key not found")) {
-            mainWindow.webContents.send(
-              this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-              "OpenAI API key not found in environment variables. Please set the OPEN_AI_API_KEY environment variable."
-            )
-          } else {
-            mainWindow.webContents.send(
-              this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-              result.error
-            )
-          }
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+            result.error
+          )
           // Reset view back to queue on error
           console.log("Resetting view to queue due to error")
           this.deps.setView("queue")
@@ -168,20 +187,10 @@ export class ProcessingHelper {
       } catch (error: any) {
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-          error
+          error.message || "Server error. Please try again."
         )
         console.error("Processing error:", error)
-        if (error.name === "CanceledError") {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Processing was canceled by the user."
-          )
-        } else {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            error.message || "Server error. Please try again."
-          )
-        }
+
         // Reset view back to queue on error
         console.log("Resetting view to queue due to error")
         this.deps.setView("queue")
@@ -208,10 +217,10 @@ export class ProcessingHelper {
           [
             ...this.screenshotHelper.getScreenshotQueue(),
             ...extraScreenshotQueue
-          ].map(async (path) => ({
-            path,
-            preview: await this.screenshotHelper.getImagePreview(path),
-            data: fs.readFileSync(path).toString("base64")
+          ].map(async (filePath) => ({
+            path: filePath,
+            data: fs.readFileSync(filePath).toString("base64"),
+            mimeType: this.getMimeType(filePath)
           }))
         )
         console.log(
@@ -237,17 +246,10 @@ export class ProcessingHelper {
           )
         }
       } catch (error: any) {
-        if (error.name === "CanceledError") {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
-            "Extra processing was canceled by the user."
-          )
-        } else {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
-            error.message
-          )
-        }
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
+          error.message
+        )
       } finally {
         this.currentExtraProcessingAbortController = null
       }
@@ -255,46 +257,57 @@ export class ProcessingHelper {
   }
 
   private async processScreenshotsHelper(
-    screenshots: Array<{ path: string; data: string }>,
+    screenshots: ScreenshotPayload[],
     signal: AbortSignal
   ) {
     try {
-      const imageDataList = screenshots.map((screenshot) => screenshot.data)
+      const imageParts: Part[] = screenshots.map((screenshot) => ({
+        inlineData: {
+          data: screenshot.data,
+          mimeType: screenshot.mimeType
+        }
+      }))
       const mainWindow = this.deps.getMainWindow()
-      const language = await this.getLanguage()
 
-      // Use the helper function for the API call
-      const extractResponse = await this._callOpenAI("Extract", {
-        model: OPENAI_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                // Updated prompt to explicitly ask for the code snippet as well and mention response language
-                text: `Extract the coding problem statement AND the relevant code snippet from these images. The problem might be stated as a question (e.g., "What will this code output?"). Ensure you include the actual code itself, not just the question. Programming Language: ${language}. Respond in ${OPENAI_RESPONSE_LANGUAGE}. Return the combined problem statement and code.`
-              },
-              ...imageDataList.map(image => ({
-                type: "image_url" as "image_url",
-                image_url: { url: `data:image/jpeg;base64,${image}` }
-              }))
-            ]
-          }
-        ],
-        max_tokens: 2000
-      }, { signal });
+      const extractPrompt = `You are given up to ${screenshots.length} screenshot(s) containing a coding interview question. Extract the complete problem statement, including every requirement, example, or detail, as well as any code snippet that appears in the screenshots. Respond strictly in ${GEMINI_RESPONSE_LANGUAGE} and follow this JSON schema:
+{
+  "problem_statement": "Full description in ${GEMINI_RESPONSE_LANGUAGE}",
+  "code_snippet": "Any starter or reference code (may be empty)"
+}`
 
-      const problemInfo = extractResponse.choices[0]?.message?.content || ""
+      const extractionRaw = await this.callGemini(
+        this.jsonModel,
+        "Extract",
+        [extractPrompt, ...imageParts],
+        signal
+      )
 
-      // Store problem info in AppState
-      this.deps.setProblemInfo({ problem_statement: problemInfo })
+      const extracted =
+        this.parseJson<ProblemExtractionPayload>(extractionRaw) ||
+        ({ problem_statement: extractionRaw } as ProblemExtractionPayload)
+
+      const problemStatement = [
+        extracted.problem_statement?.trim(),
+        extracted.code_snippet?.trim()
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+      const normalizedProblemStatement = (
+        problemStatement ||
+        extracted.problem_statement ||
+        extractionRaw ||
+        ""
+      ).trim()
+
+      this.deps.setProblemInfo({
+        problem_statement: normalizedProblemStatement
+      })
 
       // Send first success event
-      if (mainWindow) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.PROBLEM_EXTRACTED,
-          { problem_statement: problemInfo }
+          { problem_statement: normalizedProblemStatement }
         )
 
         // Generate solutions after successful extraction
@@ -302,10 +315,6 @@ export class ProcessingHelper {
         if (solutionsResult.success) {
           // Clear any existing extra screenshots before transitioning to solutions view
           this.screenshotHelper.clearExtraScreenshotQueue()
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-            solutionsResult.data
-          )
           return { success: true, data: solutionsResult.data }
         } else {
           throw new Error(
@@ -313,8 +322,9 @@ export class ProcessingHelper {
           )
         }
       }
+      return { success: false, error: "Window destroyed" }
     } catch (error: any) {
-      if (error.name === "CanceledError") {
+      if (error.name === "AbortError") {
         return {
           success: false,
           error: "Processing was canceled by the user."
@@ -323,8 +333,7 @@ export class ProcessingHelper {
 
       console.error("Processing error details:", {
         message: error.message,
-        code: error.code,
-        response: error.response,
+        code: error.code
       })
 
       return { success: false, error: error.message }
@@ -340,89 +349,70 @@ export class ProcessingHelper {
         throw new Error("No problem info available")
       }
 
-      // Use the helper function for the API call
-      const response = await this._callOpenAI("Generate", {
-        model: OPENAI_MODEL,
-        messages: [
-          {
-            role: "system",
-            // Updated system prompt for conciseness, prioritization, full language adherence, and short_answer field
-            content: `You are an expert coding assistant. Analyze the provided problem and code snippet.
-Respond ENTIRELY in ${OPENAI_RESPONSE_LANGUAGE}. Be concise and focus on the essential information.
+      const solutionPrompt = `You are an expert coding assistant helping with interview preparation. Analyze the problem statement below and respond in ${GEMINI_RESPONSE_LANGUAGE}. Output JSON that matches this schema exactly:
+{
+  "short_answer": "nullable string with the concise final answer in ${GEMINI_RESPONSE_LANGUAGE}",
+  "code": "Complete ${language} solution. Comments must be in ${GEMINI_RESPONSE_LANGUAGE}.",
+  "thoughts": ["Array of step-by-step explanations in ${GEMINI_RESPONSE_LANGUAGE}"],
+  "time_complexity": "Time complexity in ${GEMINI_RESPONSE_LANGUAGE}",
+  "space_complexity": "Space complexity in ${GEMINI_RESPONSE_LANGUAGE}"
+}
 
-Instructions:
-1.  If possible, provide a very brief, direct answer to the problem first (e.g., the final output value or a direct yes/no).
-2.  Then, provide the detailed explanation, code, and complexity analysis.
-3.  Generate a response in JSON format containing the following fields:
-    - "short_answer": (Nullable string) A very brief, direct answer to the problem, if applicable (e.g., the program's output). Use null if not applicable. MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "code": (String) The corrected or proposed code solution in ${language}. Comments within the code MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "thoughts": (Array of strings) Explanation of your thought process, step-by-step. MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "time_complexity": (String) Time complexity analysis (e.g., "O(n)"). MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "space_complexity": (String) Space complexity analysis (e.g., "O(1)"). MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
+If a field is unknown, use null for short_answer and "N/A" for complexity entries.
 
-If the problem statement is incomplete or unclear, set "short_answer" to null, explain the issue clearly in the "thoughts" field (in ${OPENAI_RESPONSE_LANGUAGE}), and set "code" to an empty string or a relevant placeholder comment (in ${OPENAI_RESPONSE_LANGUAGE}).`
-          },
-          {
-            role: "user",
-            // Ensure the problem statement from extraction is passed correctly
-            content: `Problem and Code:\n\`\`\`\n${problemInfo.problem_statement}\n\`\`\`\n\nGenerate the JSON response as described in the system prompt.`
-          }
-        ],
-        max_tokens: 2000
-      }, { signal });
+Problem statement:
+${problemInfo.problem_statement}`
 
-      const rawContent = response.choices[0]?.message?.content || ""
-      let structuredData = {
-        short_answer: null as string | null, // Added field
+      const rawContent = await this.callGemini(
+        this.jsonModel,
+        "GenerateSolution",
+        [solutionPrompt],
+        signal
+      )
+
+      let structuredData: SolutionPayload = {
+        short_answer: null,
         code: "",
-        thoughts: ["Failed to parse AI response."],
+        thoughts: ["Failed to parse Gemini response."],
         time_complexity: "N/A",
         space_complexity: "N/A"
-      };
+      }
 
-      try {
-        let jsonToParse = rawContent.trim();
-        // Check if the response is wrapped in markdown code fences and extract JSON
-        if (jsonToParse.startsWith("```json") && jsonToParse.endsWith("```")) {
-          jsonToParse = jsonToParse.substring(7, jsonToParse.length - 3).trim();
-        } else if (jsonToParse.startsWith("```") && jsonToParse.endsWith("```")) {
-           // Handle generic ``` ``` fences as well
-           jsonToParse = jsonToParse.substring(3, jsonToParse.length - 3).trim();
-        }
-
-        // Attempt to parse the (potentially extracted) JSON
-        const parsed = JSON.parse(jsonToParse);
-        // Basic validation to ensure it has the expected structure (including optional short_answer)
-        if (parsed && typeof parsed === 'object' && 'code' in parsed && 'thoughts' in parsed && 'time_complexity' in parsed && 'space_complexity' in parsed) {
-          structuredData = {
-            short_answer: parsed.short_answer || null, // Handle optional field
-            code: parsed.code || "",
-            thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [String(parsed.thoughts || `No thoughts provided in ${OPENAI_RESPONSE_LANGUAGE}.`)],
-            time_complexity: parsed.time_complexity || "N/A",
-            space_complexity: parsed.space_complexity || "N/A"
-          };
-        } else {
-           // If parsing succeeds but structure is wrong, put raw content in thoughts
-           structuredData.thoughts = [`Received unexpected structure from AI (in ${OPENAI_RESPONSE_LANGUAGE}):`, rawContent];
-           structuredData.code = `// AI Response (unexpected format):\n${rawContent}`;
-           structuredData.short_answer = null; // Ensure short_answer is null
-        }
-      } catch (parseError) {
-        // If JSON parsing fails, return the raw string as 'code' and add a thought
-         console.warn(`Failed to parse OpenAI response as JSON (language: ${OPENAI_RESPONSE_LANGUAGE}). Raw content:`, rawContent);
-        // Improved error handling for non-JSON responses
+      const parsed = this.parseJson<SolutionPayload>(rawContent)
+      if (parsed && parsed.code && parsed.thoughts) {
         structuredData = {
-          short_answer: null, // Ensure short_answer is null
-          code: `// Error: Could not process the response from the AI.`,
-          thoughts: [`The AI response could not be understood (expected JSON format). Response language set to ${OPENAI_RESPONSE_LANGUAGE}.`, "Raw AI Response:", rawContent],
+          short_answer: parsed.short_answer ?? null,
+          code: parsed.code || "",
+          thoughts: Array.isArray(parsed.thoughts)
+            ? parsed.thoughts
+            : [String(parsed.thoughts)],
+          time_complexity: parsed.time_complexity || "N/A",
+          space_complexity: parsed.space_complexity || "N/A"
+        }
+      } else {
+        structuredData = {
+          short_answer: null,
+          code: "// Failed to parse Gemini response.",
+          thoughts: [
+            `Gemini response could not be parsed as JSON (requested language: ${GEMINI_RESPONSE_LANGUAGE}).`,
+            rawContent
+          ],
           time_complexity: "N/A",
           space_complexity: "N/A"
-        };
+        }
+      }
+
+      const currentProblem = this.deps.getProblemInfo()
+      if (currentProblem) {
+        this.deps.setProblemInfo({
+          ...currentProblem,
+          solution: structuredData.code
+        })
       }
 
       return { success: true, data: structuredData }
     } catch (error: any) {
-      if (error.name === "CanceledError") {
+      if (error.name === "AbortError") {
         this.cancelOngoingRequests()
         this.deps.clearQueues()
         this.deps.setView("queue")
@@ -431,19 +421,18 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
           mainWindow.webContents.send("reset-view")
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Request timed out. The server took too long to respond. Please try again."
+            "Request canceled."
           )
         }
         return {
           success: false,
-          error: "Request timed out. Please try again."
+          error: "Request canceled."
         }
       }
 
       console.error("Generate error details:", {
         message: error.message,
-        code: error.code,
-        response: error.response,
+        code: error.code
       })
 
       return { success: false, error: error.message }
@@ -451,11 +440,16 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
   }
 
   private async processExtraScreenshotsHelper(
-    screenshots: Array<{ path: string; data: string }>,
+    screenshots: ScreenshotPayload[],
     signal: AbortSignal
   ) {
     try {
-      const imageDataList = screenshots.map((screenshot) => screenshot.data)
+      const imageParts: Part[] = screenshots.map((screenshot) => ({
+        inlineData: {
+          data: screenshot.data,
+          mimeType: screenshot.mimeType
+        }
+      }))
       const problemInfo = this.deps.getProblemInfo()
       const language = await this.getLanguage()
 
@@ -463,35 +457,26 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
         throw new Error("No problem info available")
       }
 
-      // Use the helper function for the API call
-      const response = await this._callOpenAI("Debug", {
-        model: OPENAI_MODEL,
-        messages: [
-          {
-            role: "system",
-            // Added response language to debug prompt
-            content: `You are an expert debugger. Analyze and fix this code in ${language} language. Respond in ${OPENAI_RESPONSE_LANGUAGE}.`
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Problem: ${problemInfo.problem_statement}\n\nCurrent solution: ${problemInfo.solution}\n\nDebug this code.`
-              },
-              ...imageDataList.map(image => ({
-                type: "image_url" as "image_url",
-                image_url: { url: `data:image/jpeg;base64,${image}` }
-              }))
-            ]
-          }
-        ],
-        max_tokens: 2000
-      }, { signal });
+      const debugPrompt = `You are assisting with debugging during a coding interview. The candidate has provided additional screenshots of their work.
 
-      return { success: true, data: response.choices[0]?.message?.content || "" }
+Problem (in ${GEMINI_RESPONSE_LANGUAGE}):
+${problemInfo.problem_statement}
+
+Current AI solution in ${language}:
+${problemInfo.solution || "// No solution available yet."}
+
+Using the new screenshots, provide updated guidance in ${GEMINI_RESPONSE_LANGUAGE}. Suggest fixes, highlight mistakes, and offer an improved approach.`
+
+      const responseText = await this.callGemini(
+        this.textModel,
+        "Debug",
+        [debugPrompt, ...imageParts],
+        signal
+      )
+
+      return { success: true, data: responseText }
     } catch (error: any) {
-      if (error.name === "CanceledError") {
+      if (error.name === "AbortError") {
         return {
           success: false,
           error: "Processing was canceled by the user."
@@ -500,11 +485,97 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
 
       console.error("Debug error details:", {
         message: error.message,
-        code: error.code,
-        response: error.response,
+        code: error.code
       })
 
       return { success: false, error: error.message }
+    }
+  }
+
+  private async callGemini(
+    model: GenerativeModel,
+    context: string,
+    parts: (string | Part)[],
+    signal?: AbortSignal
+  ): Promise<string> {
+    if (signal?.aborted) {
+      const abortError = new Error("Request aborted")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    // Convert string parts to Part objects if necessary
+    const formattedParts: Part[] = parts.map(p => {
+      if (typeof p === 'string') return { text: p };
+      return p;
+    });
+
+    const safePartsPreview = formattedParts
+      .map((part) => ("text" in part && typeof part.text === "string" ? part.text : "[Image/Data]"))
+      .join("\n---\n")
+    console.log(`[Gemini Request - ${context}]`, safePartsPreview.substring(0, 500) + "...")
+
+    try {
+      // Note: The Google AI SDK doesn't support AbortSignal directly in generateContent in all versions,
+      // but we can check the signal before and after.
+      // If the SDK version supports it in RequestOptions, we pass it.
+      // @ts-ignore - signal might not be in type definition depending on version but often works or is ignored
+      const result = await model.generateContent({ contents: [{ role: "user", parts: formattedParts }] });
+
+      if (signal?.aborted) {
+        throw new Error("Request aborted");
+      }
+
+      const responseText = result.response.text();
+      console.log(`[Gemini Response - ${context}]`, responseText.substring(0, 500) + "...")
+      return responseText
+    } catch (error) {
+      console.error(`[Gemini Error - ${context}]`, error)
+      throw error
+    }
+  }
+
+  private parseJson<T>(raw: string): T | null {
+    if (!raw) return null
+
+    let candidate = raw.trim()
+    if (!candidate) return null
+
+    // Remove markdown code fences if present
+    if (candidate.startsWith("```")) {
+      const match = candidate.match(/^```(?:\w+)?\s*([\s\S]*?)\s*```$/);
+      if (match) {
+        candidate = match[1];
+      } else {
+        // Fallback simple slice if regex fails
+        const fence = candidate.startsWith("```json") ? "```json" : "```"
+        candidate = candidate
+          .slice(fence.length, candidate.length - 3)
+          .trim()
+      }
+    }
+
+    try {
+      return JSON.parse(candidate) as T
+    } catch (error) {
+      console.warn("Failed to parse JSON response from Gemini:", error)
+      return null
+    }
+  }
+
+  private getMimeType(filePath: string): string {
+    const extension = path.extname(filePath).toLowerCase()
+    switch (extension) {
+      case ".jpg":
+      case ".jpeg":
+        return "image/jpeg"
+      case ".webp":
+        return "image/webp"
+      case ".bmp":
+        return "image/bmp"
+      case ".png":
+      default:
+        return "image/png"
     }
   }
 
@@ -541,7 +612,7 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
       this.currentProcessingAbortController.abort()
       this.currentProcessingAbortController = null
     }
-    
+
     if (this.currentExtraProcessingAbortController) {
       this.currentExtraProcessingAbortController.abort()
       this.currentExtraProcessingAbortController = null

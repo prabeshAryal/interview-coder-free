@@ -99,7 +99,8 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ToastContext.Provider value={{ showToast }}>
         <ToastProvider>
-          <div className="min-h-screen bg-transparent">
+          <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/20 selection:text-primary">
+            <div className="fixed inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-background to-background pointer-events-none" />
             <SubscribedApp
               credits={credits}
               currentLanguage={currentLanguage}
@@ -111,11 +112,12 @@ function App() {
                 setToastState((prev) => ({ ...prev, open }))
               }
               variant={toastState.variant}
+              className="glass-card border-white/10 bg-black/80 text-white"
             >
               <div className="grid gap-1">
-                {toastState.title && <ToastTitle>{toastState.title}</ToastTitle>}
+                {toastState.title && <ToastTitle className="text-indigo-400">{toastState.title}</ToastTitle>}
                 {toastState.description && (
-                  <ToastDescription>{toastState.description}</ToastDescription>
+                  <ToastDescription className="text-gray-300">{toastState.description}</ToastDescription>
                 )}
               </div>
             </Toast>

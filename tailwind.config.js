@@ -11,7 +11,8 @@ export default {
         out: "out 0.2s ease-in",
         pulse: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
         shimmer: "shimmer 2s linear infinite",
-        "text-gradient-wave": "textGradientWave 2s infinite ease-in-out"
+        "text-gradient-wave": "textGradientWave 2s infinite ease-in-out",
+        "gradient-x": "gradient-x 3s ease infinite"
       },
       keyframes: {
         textGradientWave: {
@@ -40,6 +41,14 @@ export default {
           },
           "50%": {
             opacity: 0.5
+          }
+        },
+        "gradient-x": {
+          "0%, 100%": {
+            backgroundPosition: "0% 50%"
+          },
+          "50%": {
+            backgroundPosition: "100% 50%"
           }
         }
       }

@@ -48,7 +48,16 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom", "react-router-dom"],
+          ui: ["@radix-ui/react-dialog", "@radix-ui/react-label", "@radix-ui/react-slot", "@radix-ui/react-toast", "lucide-react"],
+          utils: ["axios", "clsx", "tailwind-merge", "uuid"]
+        }
+      }
+    }
   },
   resolve: {
     alias: {

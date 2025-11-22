@@ -1,6 +1,8 @@
 {
   "name": "interview-coder-v1",
   "version": "1.0.18",
+  "description": "AI-powered interview coding assistant",
+  "author": "Interview Coder Team",
   "main": "dist-electron/main.js",
   "scripts": {
     "clean": "rimraf dist dist-electron",
@@ -105,12 +107,9 @@
       "main": "dist-electron/main.js"
     }
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "An invisible desktop application to help you pass your technical interviews.",
   "dependencies": {
     "@electron/notarize": "^2.3.0",
+    "@google/generative-ai": "^0.21.0",
     "@emotion/react": "^11.11.0",
     "@emotion/styled": "^11.11.0",
     "@radix-ui/react-dialog": "^1.1.2",
