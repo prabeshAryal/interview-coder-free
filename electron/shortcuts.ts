@@ -12,14 +12,17 @@ export class ShortcutsHelper {
     globalShortcut.register("CommandOrControl+H", async () => {
       const mainWindow = this.deps.getMainWindow()
       if (mainWindow) {
-        console.log("Taking screenshot...")
+        console.log("=== Taking screenshot (Cmd+H) ===")
         try {
           const screenshotPath = await this.deps.takeScreenshot()
+          console.log("Screenshot saved at:", screenshotPath)
           const preview = await this.deps.getImagePreview(screenshotPath)
+          console.log("Preview generated, sending screenshot-taken event to renderer")
           mainWindow.webContents.send("screenshot-taken", {
             path: screenshotPath,
             preview
           })
+          console.log("screenshot-taken event sent successfully")
         } catch (error) {
           console.error("Error capturing screenshot:", error)
         }

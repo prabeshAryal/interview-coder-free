@@ -164,12 +164,18 @@ function clearQueues(): void {
 
 async function takeScreenshot(): Promise<string> {
   if (!state.mainWindow) throw new Error("No main window available")
-  return (
-    state.screenshotHelper?.takeScreenshot(
-      () => hideMainWindow(),
-      () => showMainWindow()
-    ) || ""
-  )
+  
+  const screenshotPath = await state.screenshotHelper?.takeScreenshot(
+    () => hideMainWindow(),
+    () => showMainWindow()
+  ) || ""
+  
+  // IMPORTANT: Sync main state view with ScreenshotHelper's view
+  // ScreenshotHelper resets to "queue" when taking a new screenshot
+  // We must also update main state so ProcessingHelper uses correct view
+  state.view = "queue"
+  
+  return screenshotPath
 }
 
 async function getImagePreview(filepath: string): Promise<string> {

@@ -129,46 +129,32 @@ export class ScreenshotHelper {
           ? await this.captureScreenshotMac()
           : await this.captureScreenshotWindows()
 
-      // Save and manage the screenshot based on current view
-      if (this.view === "queue") {
-        screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.png`)
-        await fs.promises.writeFile(screenshotPath, screenshotBuffer)
-        console.log("Adding screenshot to main queue:", screenshotPath)
-        this.screenshotQueue.push(screenshotPath)
-        if (this.screenshotQueue.length > this.MAX_SCREENSHOTS) {
-          const removedPath = this.screenshotQueue.shift()
-          if (removedPath) {
-            try {
-              await fs.promises.unlink(removedPath)
-              console.log(
-                "Removed old screenshot from main queue:",
-                removedPath
-              )
-            } catch (error) {
-              console.error("Error removing old screenshot:", error)
-            }
-          }
-        }
-      } else {
-        // In solutions view, only add to extra queue
-        screenshotPath = path.join(this.extraScreenshotDir, `${uuidv4()}.png`)
-        await fs.promises.writeFile(screenshotPath, screenshotBuffer)
-        console.log("Adding screenshot to extra queue:", screenshotPath)
-        this.extraScreenshotQueue.push(screenshotPath)
-        if (this.extraScreenshotQueue.length > this.MAX_SCREENSHOTS) {
-          const removedPath = this.extraScreenshotQueue.shift()
-          if (removedPath) {
-            try {
-              await fs.promises.unlink(removedPath)
-              console.log(
-                "Removed old screenshot from extra queue:",
-                removedPath
-              )
-            } catch (error) {
-              console.error("Error removing old screenshot:", error)
-            }
-          }
-        }
+      // Always save to main queue - new screenshots should always be treated as new problems
+      // This ensures that pressing Cmd+H followed by Cmd+Enter always processes a new question
+      screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.png`)
+      await fs.promises.writeFile(screenshotPath, screenshotBuffer)
+      console.log("Adding screenshot to main queue:", screenshotPath)
+      
+      // Clear previous screenshots and add new one (fresh start for new problem)
+      this.screenshotQueue.forEach((oldPath) => {
+        fs.unlink(oldPath, (err) => {
+          if (err) console.error(`Error deleting old screenshot at ${oldPath}:`, err)
+        })
+      })
+      this.screenshotQueue = [screenshotPath]
+      
+      // Also clear extra queue since we're starting fresh
+      this.extraScreenshotQueue.forEach((oldPath) => {
+        fs.unlink(oldPath, (err) => {
+          if (err) console.error(`Error deleting extra screenshot at ${oldPath}:`, err)
+        })
+      })
+      this.extraScreenshotQueue = []
+      
+      // Reset view to queue so next processing treats this as a new problem
+      if (this.view !== "queue") {
+        console.log("Resetting view to queue for new screenshot")
+        this.view = "queue"
       }
     } catch (error) {
       console.error("Screenshot error:", error)

@@ -1,6 +1,6 @@
 // file: src/components/SubscribedApp.tsx
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import Queue from "../_pages/Queue"
 import Solutions from "../_pages/Solutions"
 import { useToast } from "../contexts/toast"
@@ -20,6 +20,23 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
   const [view, setView] = useState<"queue" | "solutions" | "debug">("queue")
   const containerRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
+
+  // Handle screenshot-taken at this level to ensure it works regardless of view
+  useEffect(() => {
+    const cleanup = window.electronAPI.onScreenshotTaken(() => {
+      console.log("SubscribedApp: screenshot-taken received, current view:", view)
+      // Switch to queue view first, then invalidate after a brief delay
+      setView("queue")
+      // Use a slight delay to ensure view change completes before refetch
+      setTimeout(() => {
+        console.log("SubscribedApp: invalidating screenshots query")
+        queryClient.invalidateQueries({
+          queryKey: ["screenshots"]
+        })
+      }, 50)
+    })
+    return () => cleanup()
+  }, [view, queryClient])
 
   // Let's ensure we reset queries etc. if some electron signals happen
   useEffect(() => {

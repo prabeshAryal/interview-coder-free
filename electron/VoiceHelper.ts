@@ -93,6 +93,10 @@ export class VoiceHelper {
     }
 
     try {
+      // Reset the view to queue first (clears previous state)
+      this.deps.setView("queue")
+      mainWindow.webContents.send("reset-view")
+      
       // Re-initialize GenAI if needed
       if (!this.genAI) {
         const apiKey = store.get("GEMINI_API_KEY") as string
