@@ -25,8 +25,10 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
   useEffect(() => {
     const cleanup = window.electronAPI.onScreenshotTaken(() => {
       console.log("SubscribedApp: screenshot-taken received, current view:", view)
-      // Switch to queue view first, then invalidate after a brief delay
+      // Don't clear solution history - preserve until user presses Ctrl+R
+      // Just switch to queue view and refresh screenshots
       setView("queue")
+      
       // Use a slight delay to ensure view change completes before refetch
       setTimeout(() => {
         console.log("SubscribedApp: invalidating screenshots query")
@@ -67,8 +69,13 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
 
     const updateDimensions = () => {
       if (!containerRef.current) return
-      const height = containerRef.current.scrollHeight
-      const width = containerRef.current.scrollWidth
+      let height = containerRef.current.scrollHeight
+      let width = containerRef.current.scrollWidth
+      
+      // Ensure minimum dimensions to prevent window from collapsing
+      width = Math.max(width, 120)
+      height = Math.max(height, 80)
+      
       window.electronAPI?.updateContentDimensions({ width, height })
     }
 

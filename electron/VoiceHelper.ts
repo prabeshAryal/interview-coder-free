@@ -1,6 +1,16 @@
 import { GoogleGenAI } from "@google/genai"
 import { BrowserWindow } from "electron"
 import Store from "electron-store"
+import {
+  DEFAULT_MODEL,
+  getFallbackChain,
+  isRateLimitError,
+  isNetworkError,
+  getErrorMessage,
+  RETRY_CONFIG,
+  GeminiModel
+} from "./config"
+import { getConversationContext, addToConversationHistory } from "./ProcessingHelper"
 
 const store = new Store()
 
@@ -115,35 +125,76 @@ export class VoiceHelper {
         contextPrompt = `\n\nCurrent coding problem context:\n${problemInfo.problem_statement}`
       }
 
-      // Get the selected model from store, default to gemini-2.0-flash
-      const selectedModel = (store.get("GEMINI_MODEL") as string) || "gemini-2.0-flash"
-      console.log("Using model for voice:", selectedModel)
+      // Add conversation history context
+      const conversationContext = getConversationContext()
+      if (conversationContext) {
+        contextPrompt += `\n\nPrevious conversation (for continuity):\n${conversationContext}`
+      }
 
-      // First transcribe the audio using Gemini
-      const transcriptionResponse = await this.genAI.models.generateContent({
-        model: selectedModel,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: "Please transcribe this audio exactly as spoken. Only return the transcription, nothing else." },
+      // Get the selected model from store, default to configured default
+      const userModel = (store.get("GEMINI_MODEL") as string as GeminiModel) || DEFAULT_MODEL
+      const models = getFallbackChain(userModel)
+      
+      console.log("Using model for voice:", userModel, "with fallback chain:", models)
+
+      // First transcribe the audio using Gemini with fallback
+      let transcription = ""
+      let successfulModel = userModel
+      
+      for (const modelName of models) {
+        try {
+          console.log(`[Voice Transcription] Attempting with model: ${modelName}`)
+          
+          const transcriptionResponse = await this.genAI.models.generateContent({
+            model: modelName,
+            contents: [
               {
-                inlineData: {
-                  data: audioBase64,
-                  mimeType: "audio/webm"
-                }
+                role: "user",
+                parts: [
+                  { text: "Please transcribe this audio exactly as spoken. Only return the transcription, nothing else." },
+                  {
+                    inlineData: {
+                      data: audioBase64,
+                      mimeType: "audio/webm"
+                    }
+                  }
+                ]
               }
             ]
-          }
-        ]
-      })
+          })
 
-      const transcription = transcriptionResponse.text?.trim() || ""
+          transcription = transcriptionResponse.text?.trim() || ""
+          successfulModel = modelName
+          console.log(`[Voice Transcription] Success with ${modelName}`)
+          break
+        } catch (error: any) {
+          console.warn(`[Voice Transcription] Model ${modelName} failed:`, error.message)
+          
+          if (isRateLimitError(error)) {
+            console.log(`[Voice Transcription] Rate limit hit, trying next model...`)
+            await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
+            continue
+          }
+          
+          if (isNetworkError(error)) {
+            console.log(`[Voice Transcription] Network error, retrying...`)
+            await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
+            continue
+          }
+          
+          // For other errors, try next model
+          continue
+        }
+      }
+
       console.log("Transcription:", transcription)
 
       if (!transcription) {
         return { success: false, error: "Could not transcribe audio. Please try again." }
       }
+
+      // Add voice question to conversation history
+      addToConversationHistory("user", `Voice question: ${transcription}`)
 
       // Send transcription to renderer
       mainWindow.webContents.send(this.VOICE_EVENTS.TRANSCRIPTION_COMPLETE, {
@@ -173,21 +224,52 @@ You MUST respond in JSON format with the following structure:
 
 IMPORTANT: Return ONLY valid JSON, no markdown code fences or other text.`
 
-      // Now get AI response to the transcribed question
-      const responseResult = await this.genAI.models.generateContent({
-        model: selectedModel,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: systemPrompt },
-              { text: `\n\nUser's voice question: ${transcription}` }
+      // Now get AI response to the transcribed question with fallback
+      let rawResponse = ""
+      
+      for (const modelName of models) {
+        try {
+          console.log(`[Voice Response] Attempting with model: ${modelName}`)
+          
+          const responseResult = await this.genAI.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: systemPrompt },
+                  { text: `\n\nUser's voice question: ${transcription}` }
+                ]
+              }
             ]
-          }
-        ]
-      })
+          })
 
-      const rawResponse = responseResult.text || ""
+          rawResponse = responseResult.text || ""
+          successfulModel = modelName
+          console.log(`[Voice Response] Success with ${modelName}`)
+          
+          // Emit model used event
+          mainWindow.webContents.send("model-used", modelName)
+          break
+        } catch (error: any) {
+          console.warn(`[Voice Response] Model ${modelName} failed:`, error.message)
+          
+          if (isRateLimitError(error)) {
+            console.log(`[Voice Response] Rate limit hit, trying next model...`)
+            await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
+            continue
+          }
+          
+          if (isNetworkError(error)) {
+            console.log(`[Voice Response] Network error, retrying...`)
+            await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
+            continue
+          }
+          
+          continue
+        }
+      }
+
       console.log("Raw voice AI response:", rawResponse)
 
       // Parse the JSON response
@@ -244,6 +326,12 @@ IMPORTANT: Return ONLY valid JSON, no markdown code fences or other text.`
       }
 
       console.log("Sending solution-success with data:", formattedData)
+      
+      // Add voice response to conversation history
+      const responseSummary = formattedData.short_answer 
+        ? formattedData.short_answer 
+        : formattedData.thoughts.join(" ").substring(0, 300)
+      addToConversationHistory("assistant", `Voice response: ${responseSummary}`)
       
       // Set the view to solutions
       this.deps.setView("solutions")

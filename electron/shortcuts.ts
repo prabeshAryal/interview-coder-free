@@ -1,5 +1,6 @@
 import { globalShortcut, app } from "electron"
 import { IShortcutsHelperDeps } from "./main"
+import { clearConversationHistory } from "./ProcessingHelper"
 
 export class ShortcutsHelper {
   private deps: IShortcutsHelperDeps
@@ -43,6 +44,9 @@ export class ShortcutsHelper {
 
       // Clear both screenshot queues
       this.deps.clearQueues()
+      
+      // Clear conversation history
+      clearConversationHistory()
 
       console.log("Cleared queues.")
 

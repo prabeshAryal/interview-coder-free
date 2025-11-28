@@ -80,6 +80,9 @@ interface ElectronAPI {
   onVoiceTranscriptionComplete: (callback: (data: { transcription: string }) => void) => () => void
   onVoiceResponse: (callback: (data: { transcription: string; response: string }) => void) => () => void
   onVoiceError: (callback: (error: string) => void) => () => void
+  
+  // Model events
+  onModelUsed: (callback: (model: string) => void) => () => void
 }
 
 interface Window {

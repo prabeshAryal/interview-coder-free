@@ -266,14 +266,32 @@ const Solutions: React.FC<SolutionsProps> = ({
     fetchModel()
   }, [solutionData])
 
+  // Listen for model-used events to update the displayed model in real-time
+  useEffect(() => {
+    const unsubscribeModelUsed = window.electronAPI.onModelUsed((model: string) => {
+      console.log("Model used event received:", model)
+      setCurrentModel(model)
+    })
+
+    return () => {
+      unsubscribeModelUsed()
+    }
+  }, [])
+
   const { showToast } = useToast()
 
   useEffect(() => {
     // Height update logic - send actual content height without restrictions
     const updateDimensions = () => {
       if (contentRef.current) {
-        const contentHeight = contentRef.current.scrollHeight
-        const contentWidth = contentRef.current.scrollWidth
+        let contentHeight = contentRef.current.scrollHeight
+        let contentWidth = contentRef.current.scrollWidth
+        
+        // Ensure minimum dimensions to prevent pill from disappearing
+        // Minimum should fit the pill + some padding
+        contentWidth = Math.max(contentWidth, 120)
+        contentHeight = Math.max(contentHeight, 80)
+        
         // Send full dimensions - don't add tooltip height separately
         window.electronAPI.updateContentDimensions({
           width: contentWidth,
@@ -293,7 +311,11 @@ const Solutions: React.FC<SolutionsProps> = ({
 
     // Set up event listeners
     const cleanupFunctions = [
+      // Note: screenshot-taken is primarily handled by SubscribedApp for view switching
+      // Here we just update our local extra screenshots state if still in Solutions view
       window.electronAPI.onScreenshotTaken(async () => {
+        // This may be called right before view switches to queue
+        // Only update if we're still mounted and visible
         try {
           const existing = await window.electronAPI.getScreenshots()
           const previews = normalizeScreenshotsResponse(existing)
@@ -307,7 +329,8 @@ const Solutions: React.FC<SolutionsProps> = ({
           )
           setExtraScreenshots(screenshots)
         } catch (error) {
-          console.error("Error loading extra screenshots:", error)
+          // Silently ignore - we might be unmounting
+          console.debug("Screenshot fetch in Solutions (might be unmounting):", error)
         }
       }),
       window.electronAPI.onResetView(() => {

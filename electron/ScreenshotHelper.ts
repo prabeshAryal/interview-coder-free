@@ -129,31 +129,34 @@ export class ScreenshotHelper {
           ? await this.captureScreenshotMac()
           : await this.captureScreenshotWindows()
 
-      // Always save to main queue - new screenshots should always be treated as new problems
-      // This ensures that pressing Cmd+H followed by Cmd+Enter always processes a new question
       screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.png`)
       await fs.promises.writeFile(screenshotPath, screenshotBuffer)
-      console.log("Adding screenshot to main queue:", screenshotPath)
       
-      // Clear previous screenshots and add new one (fresh start for new problem)
-      this.screenshotQueue.forEach((oldPath) => {
-        fs.unlink(oldPath, (err) => {
-          if (err) console.error(`Error deleting old screenshot at ${oldPath}:`, err)
+      if (this.view === "queue") {
+        // In queue view: stack screenshots up to MAX_SCREENSHOTS
+        if (this.screenshotQueue.length >= this.MAX_SCREENSHOTS) {
+          const oldestPath = this.screenshotQueue.shift()
+          if (oldestPath) {
+            fs.unlink(oldestPath, (err) => {
+              if (err) console.error(`Error deleting oldest screenshot at ${oldestPath}:`, err)
+            })
+          }
+        }
+        this.screenshotQueue.push(screenshotPath)
+        console.log(`Added screenshot to queue (${this.screenshotQueue.length}/${this.MAX_SCREENSHOTS}):`, screenshotPath)
+      } else {
+        // In solutions/debug view: this is a NEW question, clear old screenshots
+        // User wants to ask about something new, not combine with previous
+        this.screenshotQueue.forEach((oldPath) => {
+          fs.unlink(oldPath, (err) => {
+            if (err) console.error(`Error deleting old screenshot at ${oldPath}:`, err)
+          })
         })
-      })
-      this.screenshotQueue = [screenshotPath]
-      
-      // Also clear extra queue since we're starting fresh
-      this.extraScreenshotQueue.forEach((oldPath) => {
-        fs.unlink(oldPath, (err) => {
-          if (err) console.error(`Error deleting extra screenshot at ${oldPath}:`, err)
-        })
-      })
-      this.extraScreenshotQueue = []
-      
-      // Reset view to queue so next processing treats this as a new problem
-      if (this.view !== "queue") {
-        console.log("Resetting view to queue for new screenshot")
+        this.screenshotQueue = [screenshotPath]
+        console.log(`New question - replaced queue with fresh screenshot (1/${this.MAX_SCREENSHOTS}):`, screenshotPath)
+        
+        // Switch back to queue view
+        console.log("Switching from", this.view, "to queue view for new question")
         this.view = "queue"
       }
     } catch (error) {

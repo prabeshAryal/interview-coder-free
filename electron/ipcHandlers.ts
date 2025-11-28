@@ -6,6 +6,7 @@ import {
   IIpcHandlerDeps
 } from "./main"
 import Store from "electron-store"
+import { clearConversationHistory } from "./ProcessingHelper"
 
 const store = new Store()
 
@@ -184,6 +185,9 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
 
       // Clear all queues immediately
       deps.clearQueues()
+      
+      // Clear conversation history
+      clearConversationHistory()
 
       // Reset view to queue
       deps.setView("queue")

@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { Settings, Mic } from "lucide-react"
 import { Screenshot } from "../../types/screenshots"
 import { SettingsPanel } from "../shared/SettingsPanel"
 import ScreenshotQueue from "../Queue/ScreenshotQueue"
+import { useVoiceRecording } from "../../hooks/useVoiceRecording"
 
 export interface SolutionCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
@@ -30,10 +31,25 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
   const panelRef = useRef<HTMLDivElement>(null)
   const pillRef = useRef<HTMLDivElement>(null)
   
-  // Voice recording state
-  const [isRecording, setIsRecording] = useState(false)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
+  // Use shared voice recording hook
+  const { isRecording } = useVoiceRecording({
+    onRecordingStart: () => {
+      console.log("Recording started (Solutions view)")
+    },
+    onRecordingStop: () => {
+      console.log("Recording stopped (Solutions view)")
+    },
+    onAudioReady: async (base64Audio) => {
+      try {
+        await window.electronAPI.processVoiceAudio(base64Audio)
+      } catch (error) {
+        console.error('Error processing voice audio:', error)
+      }
+    },
+    onError: (error) => {
+      console.error("Voice recording error:", error)
+    }
+  })
 
   // Control window focusability based on panel state
   useEffect(() => {
@@ -71,87 +87,6 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
   useEffect(() => {
     onTooltipVisibilityChange(isPanelOpen, isPanelOpen ? 280 : 0)
   }, [isPanelOpen, onTooltipVisibilityChange])
-
-  // Voice recording functions
-  const startRecording = useCallback(async () => {
-    if (isRecording || mediaRecorderRef.current) return
-    
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      })
-      
-      audioChunksRef.current = []
-      
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
-        }
-      }
-      
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        const arrayBuffer = await audioBlob.arrayBuffer()
-        const base64Audio = btoa(
-          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-        )
-        
-        // Send audio data to main process for processing
-        try {
-          await window.electronAPI.processVoiceAudio(base64Audio)
-        } catch (error) {
-          console.error('Error processing voice audio:', error)
-        }
-        
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop())
-        
-        // Clear refs so next recording can start
-        mediaRecorderRef.current = null
-        audioChunksRef.current = []
-      }
-      
-      mediaRecorderRef.current = mediaRecorder
-      mediaRecorder.start()
-      setIsRecording(true)
-      console.log('Voice recording started (Solutions view)')
-    } catch (error) {
-      console.error('Error starting recording:', error)
-      mediaRecorderRef.current = null
-    }
-  }, [isRecording])
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-      console.log('Voice recording stopped (Solutions view)')
-    }
-  }, [isRecording])
-
-  // Listen for voice recording keyboard shortcut
-  useEffect(() => {
-    const handleRecordingStarted = () => {
-      console.log('Voice recording shortcut triggered (Solutions view), isRecording:', isRecording, 'mediaRecorder:', !!mediaRecorderRef.current)
-      if (!isRecording && !mediaRecorderRef.current) {
-        startRecording()
-      }
-    }
-
-    const handleRecordingStopped = () => {
-      console.log('Voice recording stop triggered (Solutions view)')
-      stopRecording()
-    }
-
-    const unsubscribeStart = window.electronAPI.onVoiceRecordingStarted(handleRecordingStarted)
-    const unsubscribeStop = window.electronAPI.onVoiceRecordingStopped(handleRecordingStopped)
-
-    return () => {
-      unsubscribeStart()
-      unsubscribeStop()
-    }
-  }, [isRecording, startRecording, stopRecording])
 
   return (
     <>
@@ -200,14 +135,14 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
         )}
       </div>
 
-      {/* Settings Panel - FIXED positioning ABOVE the pill */}
+      {/* Settings Panel - FIXED positioning ABOVE the pill with max height */}
       {isPanelOpen && (
         <div
           ref={panelRef}
-          className="fixed w-72 bg-[#0a0a0a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[9999]"
+          className="fixed w-72 bg-[#0a0a0a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-visible z-[9999] max-h-[70vh] overflow-y-auto"
           style={{
             bottom: panelPosition.bottom,
-            left: panelPosition.left
+            left: Math.max(16, panelPosition.left) // Ensure minimum left margin
           }}
         >
           <div className="p-3">

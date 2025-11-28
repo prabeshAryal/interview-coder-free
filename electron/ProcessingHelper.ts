@@ -4,14 +4,66 @@ import { IProcessingHelperDeps } from "./main"
 import { app, BrowserWindow } from "electron"
 import { GoogleGenAI, Part } from "@google/genai"
 import Store from "electron-store"
+import {
+  DEFAULT_MODEL,
+  getFallbackChain,
+  isRateLimitError,
+  isNetworkError,
+  getErrorMessage,
+  RETRY_CONFIG,
+  RESPONSE_LANGUAGE,
+  GeminiModel
+} from "./config"
 
 const store = new Store()
 
-
-
 let genAI: GoogleGenAI | null = null
 
-const OPENAI_RESPONSE_LANGUAGE = process.env.OPENAI_RESPONSE_LANGUAGE || "English"
+// Track the last successfully used model to emit to renderer
+let lastUsedModel: string = DEFAULT_MODEL
+
+// Conversation history for context preservation
+interface ConversationMessage {
+  role: "user" | "assistant"
+  content: string
+  timestamp: number
+}
+
+// Shared conversation history - persists until Ctrl+R reset
+let conversationHistory: ConversationMessage[] = []
+const MAX_HISTORY_MESSAGES = 10 // Keep last 10 exchanges for context
+
+// Export function to clear history (called on reset)
+export function clearConversationHistory() {
+  conversationHistory = []
+  console.log("Conversation history cleared")
+}
+
+// Export function to add to history
+export function addToConversationHistory(role: "user" | "assistant", content: string) {
+  conversationHistory.push({
+    role,
+    content,
+    timestamp: Date.now()
+  })
+  // Trim if too long
+  if (conversationHistory.length > MAX_HISTORY_MESSAGES * 2) {
+    conversationHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES * 2)
+  }
+}
+
+// Export function to get history summary for prompts
+export function getConversationContext(): string {
+  if (conversationHistory.length === 0) return ""
+  
+  const recentHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES)
+  return recentHistory.map(msg => {
+    const role = msg.role === "user" ? "User" : "Assistant"
+    // Truncate long messages for context
+    const content = msg.content.length > 500 ? msg.content.substring(0, 500) + "..." : msg.content
+    return `${role}: ${content}`
+  }).join("\n\n")
+}
 
 export class ProcessingHelper {
   private deps: IProcessingHelperDeps
@@ -58,25 +110,22 @@ export class ProcessingHelper {
       }
     }
 
-
-    // Get user's preferred model from store, default to gemini-2.5-flash
-    const userModel = (store.get("GEMINI_MODEL") as string) || "gemini-2.5-flash"
-    const fallbackModel = "gemini-2.0-flash"
-
-    // If a preferred model is set, try it first, then fall back to default
-    const models = [userModel]
-    if (userModel !== fallbackModel) {
-      models.push(fallbackModel)
-    }
-    let lastError: any;
+    // Get user's preferred model from store, default to configured default
+    const userModel = (store.get("GEMINI_MODEL") as string as GeminiModel) || DEFAULT_MODEL
+    
+    // Get the fallback chain starting from user's preferred model
+    const models = getFallbackChain(userModel)
+    
+    let lastError: any
+    let successfulModel: string | null = null
 
     for (const modelName of models) {
       if (signal?.aborted) {
-        throw new Error("CanceledError");
+        throw new Error("CanceledError")
       }
 
       try {
-        console.log(`[Gemini Request - ${context}] Attempting with model: ${modelName}`);
+        console.log(`[Gemini Request - ${context}] Attempting with model: ${modelName}`)
 
         const response = await genAI.models.generateContent({
           model: modelName,
@@ -90,18 +139,92 @@ export class ProcessingHelper {
               parts: promptParts
             }
           ]
-        });
+        })
 
-        const responseText = response.text;
-        console.log(`[Gemini Response - ${context}] Success with ${modelName}`);
-        return responseText || "";
+        const responseText = response.text
+        console.log(`[Gemini Response - ${context}] Success with ${modelName}`)
+        
+        // Track successful model for UI display
+        successfulModel = modelName
+        lastUsedModel = modelName
+        
+        // Emit model used event to renderer
+        const mainWindow = this.deps.getMainWindow()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("model-used", modelName)
+        }
+        
+        return responseText || ""
       } catch (error: any) {
-        console.warn(`[Gemini Error - ${context}] Model ${modelName} failed:`, error.message);
-        lastError = error;
+        const errorMessage = error.message || String(error)
+        console.warn(`[Gemini Error - ${context}] Model ${modelName} failed:`, errorMessage)
+        lastError = error
+
+        // Check if it's a rate limit error - try next model silently
+        if (isRateLimitError(error)) {
+          console.log(`[Gemini Fallback - ${context}] Rate limit hit on ${modelName}, trying next model...`)
+          
+          // Small delay before trying next model
+          await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
+          continue
+        }
+
+        // Check if it's a network error - retry with delay
+        if (isNetworkError(error)) {
+          console.log(`[Gemini Retry - ${context}] Network error on ${modelName}, retrying...`)
+          await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
+          
+          // Retry the same model once for network errors
+          try {
+            const retryResponse = await genAI.models.generateContent({
+              model: modelName,
+              config: {
+                systemInstruction: systemInstruction,
+                responseMimeType: jsonMode ? "application/json" : "text/plain"
+              },
+              contents: [
+                {
+                  role: "user",
+                  parts: promptParts
+                }
+              ]
+            })
+            
+            const retryText = retryResponse.text
+            console.log(`[Gemini Retry Success - ${context}] Success with ${modelName} after retry`)
+            
+            successfulModel = modelName
+            lastUsedModel = modelName
+            
+            const mainWindow = this.deps.getMainWindow()
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("model-used", modelName)
+            }
+            
+            return retryText || ""
+          } catch (retryError: any) {
+            console.warn(`[Gemini Retry Failed - ${context}] Model ${modelName} failed on retry:`, retryError.message)
+            lastError = retryError
+            continue
+          }
+        }
+
+        // For other errors, continue to next model
+        continue
       }
     }
 
-    throw lastError || new Error("All models failed");
+    // All models failed - throw a user-friendly error
+    const userMessage = getErrorMessage(lastError)
+    console.error(`[Gemini Error - ${context}] All models failed. Last error:`, lastError?.message)
+    throw new Error(userMessage)
+  }
+
+  /**
+   * Get the last model that was successfully used
+   */
+  public getLastUsedModel(): string {
+    return lastUsedModel
   }
 
 
@@ -318,7 +441,7 @@ export class ProcessingHelper {
       const language = await this.getLanguage()
 
       const promptParts: Part[] = [
-        { text: `Extract the coding problem statement AND the relevant code snippet from these images. The problem might be stated as a question (e.g., "What will this code output?"). Ensure you include the actual code itself, not just the question. Programming Language: ${language}. Respond in ${OPENAI_RESPONSE_LANGUAGE}. Return the combined problem statement and code.` },
+        { text: `Extract the coding problem statement AND the relevant code snippet from these images. The problem might be stated as a question (e.g., "What will this code output?"). Ensure you include the actual code itself, not just the question. Programming Language: ${language}. Respond in ${RESPONSE_LANGUAGE}. Return the combined problem statement and code.` },
         ...imageDataList.map(image => ({
           inlineData: {
             data: image,
@@ -390,22 +513,36 @@ export class ProcessingHelper {
         throw new Error("No problem info available")
       }
 
+      // Get conversation context for continuity
+      const conversationContext = getConversationContext()
+      const contextSection = conversationContext 
+        ? `\n\nPrevious conversation context (for reference):\n${conversationContext}\n\n---\n`
+        : ""
+
       const systemPrompt = `You are an expert coding assistant. Analyze the provided problem and code snippet.
-Respond ENTIRELY in ${OPENAI_RESPONSE_LANGUAGE}. Be concise and focus on the essential information.
+Respond ENTIRELY in ${RESPONSE_LANGUAGE}. Be concise and focus on the essential information.
+${contextSection ? "Use the previous conversation context to provide continuity if the current question relates to earlier discussions." : ""}
 
 Instructions:
 1.  If possible, provide a very brief, direct answer to the problem first (e.g., the final output value or a direct yes/no).
 2.  Then, provide the detailed explanation, code, and complexity analysis.
 3.  Generate a response in JSON format containing the following fields:
-    - "short_answer": (Nullable string) A very brief, direct answer to the problem, if applicable (e.g., the program's output). Use null if not applicable. MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "code": (String) The corrected or proposed code solution in ${language}. Comments within the code MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "thoughts": (Array of strings) Explanation of your thought process, step-by-step. MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "time_complexity": (String) Time complexity analysis (e.g., "O(n)"). MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
-    - "space_complexity": (String) Space complexity analysis (e.g., "O(1)"). MUST be in ${OPENAI_RESPONSE_LANGUAGE}.
+    - "short_answer": (Nullable string) A very brief, direct answer to the problem, if applicable (e.g., the program's output). Use null if not applicable. MUST be in ${RESPONSE_LANGUAGE}.
+    - "code": (String) The corrected or proposed code solution in ${language}. Comments within the code MUST be in ${RESPONSE_LANGUAGE}.
+    - "thoughts": (Array of strings) Explanation of your thought process, step-by-step. MUST be in ${RESPONSE_LANGUAGE}.
+    - "time_complexity": (String) Time complexity analysis (e.g., "O(n)"). MUST be in ${RESPONSE_LANGUAGE}.
+    - "space_complexity": (String) Space complexity analysis (e.g., "O(1)"). MUST be in ${RESPONSE_LANGUAGE}.
 
-If the problem statement is incomplete or unclear, set "short_answer" to null, explain the issue clearly in the "thoughts" field (in ${OPENAI_RESPONSE_LANGUAGE}), and set "code" to an empty string or a relevant placeholder comment (in ${OPENAI_RESPONSE_LANGUAGE}).`;
+If the problem statement is incomplete or unclear, set "short_answer" to null, explain the issue clearly in the "thoughts" field (in ${RESPONSE_LANGUAGE}), and set "code" to an empty string or a relevant placeholder comment (in ${RESPONSE_LANGUAGE}).`;
 
-      const userPrompt = `Problem and Code:\n\`\`\`\n${problemInfo.problem_statement}\n\`\`\`\n\nGenerate the JSON response as described in the system prompt.`;
+      const userPrompt = `${contextSection}Problem and Code:\n\`\`\`\n${problemInfo.problem_statement}\n\`\`\`\n\nGenerate the JSON response as described in the system prompt.`;
+
+      // Add user message to history
+      conversationHistory.push({
+        role: "user",
+        content: `Problem: ${problemInfo.problem_statement}`,
+        timestamp: Date.now()
+      })
 
       const rawContent = await this.callAIWithFallback(
         "Generate",
@@ -439,27 +576,42 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
           structuredData = {
             short_answer: parsed.short_answer || null,
             code: parsed.code || "",
-            thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [String(parsed.thoughts || `No thoughts provided in ${OPENAI_RESPONSE_LANGUAGE}.`)],
+            thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [String(parsed.thoughts || `No thoughts provided in ${RESPONSE_LANGUAGE}.`)],
             time_complexity: parsed.time_complexity || "N/A",
             space_complexity: parsed.space_complexity || "N/A"
           };
         } else {
           // If parsing succeeds but structure is wrong, put raw content in thoughts
-          structuredData.thoughts = [`Received unexpected structure from AI (in ${OPENAI_RESPONSE_LANGUAGE}):`, rawContent];
+          structuredData.thoughts = [`Received unexpected structure from AI (in ${RESPONSE_LANGUAGE}):`, rawContent];
           structuredData.code = `// AI Response (unexpected format):\n${rawContent}`;
           structuredData.short_answer = null;
         }
       } catch (parseError) {
         // If JSON parsing fails, return the raw string as 'code' and add a thought
-        console.warn(`Failed to parse OpenAI response as JSON (language: ${OPENAI_RESPONSE_LANGUAGE}). Raw content:`, rawContent);
+        console.warn(`Failed to parse OpenAI response as JSON (language: ${RESPONSE_LANGUAGE}). Raw content:`, rawContent);
         // Improved error handling for non-JSON responses
         structuredData = {
           short_answer: null,
           code: `// Error: Could not process the response from the AI.`,
-          thoughts: [`The AI response could not be understood (expected JSON format). Response language set to ${OPENAI_RESPONSE_LANGUAGE}.`, "Raw AI Response:", rawContent],
+          thoughts: [`The AI response could not be understood (expected JSON format). Response language set to ${RESPONSE_LANGUAGE}.`, "Raw AI Response:", rawContent],
           time_complexity: "N/A",
           space_complexity: "N/A"
         };
+      }
+
+      // Add assistant response to history for context continuity
+      const responseSummary = structuredData.short_answer 
+        ? `Answer: ${structuredData.short_answer}` 
+        : `Solution provided with ${structuredData.thoughts.length} thoughts`
+      conversationHistory.push({
+        role: "assistant",
+        content: responseSummary + (structuredData.code ? `\nCode: ${structuredData.code.substring(0, 300)}...` : ""),
+        timestamp: Date.now()
+      })
+      
+      // Trim history if too long
+      if (conversationHistory.length > MAX_HISTORY_MESSAGES * 2) {
+        conversationHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES * 2)
       }
 
       return { success: true, data: structuredData }
@@ -505,7 +657,7 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
         throw new Error("No problem info available")
       }
 
-      const systemPrompt = `You are an expert debugger. Analyze and fix this code in ${language} language. Respond in ${OPENAI_RESPONSE_LANGUAGE}.`;
+      const systemPrompt = `You are an expert debugger. Analyze and fix this code in ${language} language. Respond in ${RESPONSE_LANGUAGE}.`;
 
       const promptParts: Part[] = [
         { text: `Problem: ${problemInfo.problem_statement}\n\nCurrent solution: ${problemInfo.solution}\n\nDebug this code.` },
