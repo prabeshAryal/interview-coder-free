@@ -21,7 +21,11 @@ interface Window {
       height: number
     }) => Promise<void>
     clearStore: () => Promise<{ success: boolean; error?: string }>
-    getScreenshots: () => Promise<any[]>
+    getScreenshots: () => Promise<{
+      success: boolean
+      previews?: Array<{ path: string; preview: string }> | null
+      error?: string
+    }>
     deleteScreenshot: (
       path: string
     ) => Promise<{ success: boolean; error?: string }>

@@ -46,8 +46,13 @@ interface ElectronAPI {
   decrementCredits: () => Promise<void>
   onCreditsUpdated: (callback: (credits: number) => void) => () => void
   onOutOfCredits: (callback: () => void) => () => void
+
   getPlatform: () => string
+  setApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  getApiKey: () => Promise<{ success: boolean; apiKey?: string; error?: string }>
+  setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
 }
+
 
 export const PROCESSING_EVENTS = {
   //global states
@@ -220,8 +225,14 @@ const electronAPI = {
       ipcRenderer.removeListener("credits-updated", subscription)
     }
   },
-  getPlatform: () => process.platform
+
+  getPlatform: () => process.platform,
+  setApiKey: (apiKey: string) => ipcRenderer.invoke("set-api-key", apiKey),
+  getApiKey: () => ipcRenderer.invoke("get-api-key"),
+  setWindowFocusable: (focusable: boolean) => ipcRenderer.invoke("set-window-focusable", focusable),
+  quitApp: () => ipcRenderer.invoke("quit-app")
 } as ElectronAPI
+
 
 // Before exposing the API
 console.log(

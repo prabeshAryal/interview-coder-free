@@ -1,9 +1,12 @@
 // Get the platform safely
 const getPlatform = () => {
   try {
-    return window.electronAPI?.getPlatform() || 'win32' // Default to win32 if API is not available
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      return window.electronAPI.getPlatform()
+    }
+    return 'win32'
   } catch {
-    return 'win32' // Default to win32 if there's an error
+    return 'win32'
   }
 }
 
@@ -14,4 +17,4 @@ export const COMMAND_KEY = getPlatform() === 'darwin' ? '⌘' : 'Ctrl'
 export const isWindows = getPlatform() === 'win32'
 
 // Helper to check if we're on macOS
-export const isMacOS = getPlatform() === 'darwin' 
+export const isMacOS = getPlatform() === 'darwin'

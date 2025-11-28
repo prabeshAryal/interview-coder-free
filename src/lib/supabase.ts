@@ -3,42 +3,42 @@
 // Create a mock client that doesn't do anything
 export const supabase = {
   auth: {
-    getUser: async () => ({ data: { user: null }, error: null }),
-    signInWithOAuth: async () => ({ data: null, error: null }),
-    signInWithPassword: async () => ({ data: null, error: null }),
-    signUp: async () => ({ data: null, error: null }),
-    signOut: async () => ({ error: null }),
-    onAuthStateChange: () => {
-      return { data: { subscription: { unsubscribe: () => {} } } }
+    getUser: async (...args: any[]) => ({ data: { user: null }, error: null }),
+    signInWithOAuth: async (...args: any[]) => ({ data: null, error: null }),
+    signInWithPassword: async (...args: any[]) => ({ data: null, error: null }),
+    signUp: async (...args: any[]) => ({ data: null, error: null }),
+    signOut: async (...args: any[]) => ({ error: null }),
+    onAuthStateChange: (...args: any[]) => {
+      return { data: { subscription: { unsubscribe: () => { } } } }
     },
-    exchangeCodeForSession: async () => ({ data: null, error: null })
+    exchangeCodeForSession: async (...args: any[]) => ({ data: null, error: null })
   },
-  from: () => ({
-    select: () => ({
-      eq: () => ({
-        single: async () => ({ data: null, error: null }),
-        maybeSingle: async () => ({ data: null, error: null })
+  from: (...args: any[]) => ({
+    select: (...args: any[]) => ({
+      eq: (...args: any[]) => ({
+        single: async (...args: any[]) => ({ data: null, error: null }),
+        maybeSingle: async (...args: any[]) => ({ data: null, error: null })
       }),
-      maybeSingle: async () => ({ data: null, error: null })
+      maybeSingle: async (...args: any[]) => ({ data: null, error: null })
     }),
-    update: () => ({
-      eq: () => ({
-        select: () => ({
-          single: async () => ({ data: null, error: null })
+    update: (...args: any[]) => ({
+      eq: (...args: any[]) => ({
+        select: (...args: any[]) => ({
+          single: async (...args: any[]) => ({ data: null, error: null })
         })
       })
     })
   }),
-  channel: () => ({
-    on: () => ({
-      subscribe: () => ({
-        unsubscribe: () => {}
+  channel: (...args: any[]) => ({
+    on: (...args: any[]) => ({
+      subscribe: (...args: any[]) => ({
+        unsubscribe: () => { }
       })
     }),
-    subscribe: () => ({
-      unsubscribe: () => {}
+    subscribe: (...args: any[]) => ({
+      unsubscribe: () => { }
     }),
-    unsubscribe: () => {}
+    unsubscribe: () => { }
   })
 }
 
@@ -51,7 +51,7 @@ export const signInWithGoogle = async () => {
 let channel: ReturnType<typeof supabase.channel> | null = null
 
 // Monitor auth state changes and manage realtime connection
-supabase.auth.onAuthStateChange((event, session) => {
+supabase.auth.onAuthStateChange((event: any, session: any) => {
   console.log("Auth state changed:", event, session?.user?.id)
   console.log("Full session data:", session)
 
@@ -73,10 +73,10 @@ supabase.auth.onAuthStateChange((event, session) => {
     })
 
     channel
-      .on("system", { event: "*" }, (payload) => {
+      .on("system", { event: "*" }, (payload: any) => {
         console.log("System event:", payload)
       })
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         console.log("Realtime subscription status:", status)
         if (status === "SUBSCRIBED") {
           console.log("Successfully connected to realtime system")

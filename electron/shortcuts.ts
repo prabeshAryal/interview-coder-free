@@ -8,7 +8,7 @@ export class ShortcutsHelper {
     this.deps = deps
   }
 
-  public registerGlobalShortcuts(): void {
+  public registerShortcuts(): void {
     globalShortcut.register("CommandOrControl+H", async () => {
       const mainWindow = this.deps.getMainWindow()
       if (mainWindow) {

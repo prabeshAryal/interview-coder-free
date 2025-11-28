@@ -5,11 +5,12 @@ import QueueCommands from "../components/Queue/QueueCommands"
 
 import { useToast } from "../contexts/toast"
 import { Screenshot } from "../types/screenshots"
+import { normalizeScreenshotsResponse } from "../utils/screenshots"
 
 async function fetchScreenshots(): Promise<Screenshot[]> {
   try {
-    const existing = await window.electronAPI.getScreenshots()
-    return existing
+    const response = await window.electronAPI.getScreenshots()
+    return normalizeScreenshotsResponse(response)
   } catch (error) {
     console.error("Error loading screenshots:", error)
     throw error
@@ -33,6 +34,7 @@ const Queue: React.FC<QueueProps> = ({
 
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const [tooltipHeight, setTooltipHeight] = useState(0)
+  const [isPanelOpen, setIsPanelOpen] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -71,10 +73,25 @@ const Queue: React.FC<QueueProps> = ({
     const updateDimensions = () => {
       if (contentRef.current) {
         let contentHeight = contentRef.current.scrollHeight
-        const contentWidth = contentRef.current.scrollWidth
+        let contentWidth = contentRef.current.scrollWidth
+
         if (isTooltipVisible) {
           contentHeight += tooltipHeight
         }
+
+        // Base minimums for the floating UI (button)
+        // Even if content is empty, we need space for the button
+        contentWidth = Math.max(contentWidth, 60)
+        contentHeight = Math.max(contentHeight, 60)
+
+        // If panel is open, ensure we have enough space for it
+        if (isPanelOpen) {
+          // Panel is w-80 (320px) + padding. Let's reserve enough space.
+          // The panel is absolute positioned, so we need to explicitly add its dimensions.
+          contentWidth = Math.max(contentWidth, 350)
+          contentHeight = Math.max(contentHeight, 600)
+        }
+
         window.electronAPI.updateContentDimensions({
           width: contentWidth,
           height: contentHeight
@@ -123,7 +140,7 @@ const Queue: React.FC<QueueProps> = ({
       resizeObserver.disconnect()
       cleanupFunctions.forEach((cleanup) => cleanup())
     }
-  }, [isTooltipVisible, tooltipHeight])
+  }, [isTooltipVisible, tooltipHeight, isPanelOpen])
 
   const handleTooltipVisibilityChange = (visible: boolean, height: number) => {
     setIsTooltipVisible(visible)
@@ -131,24 +148,24 @@ const Queue: React.FC<QueueProps> = ({
   }
 
   return (
-    <div ref={contentRef} className={`bg-transparent w-1/2`}>
-      <div className="px-4 py-3">
-        <div className="space-y-3 w-fit">
-          <ScreenshotQueue
-            isLoading={false}
-            screenshots={screenshots}
-            onDeleteScreenshot={handleDeleteScreenshot}
-          />
+    <div
+      ref={contentRef}
+      className={`bg-transparent w-full min-w-[120px] p-4 flex flex-col items-center gap-4 transition-all duration-300 ease-in-out`}
+    >
+      <ScreenshotQueue
+        isLoading={false}
+        screenshots={screenshots}
+        onDeleteScreenshot={handleDeleteScreenshot}
+      />
 
-          <QueueCommands
-            onTooltipVisibilityChange={handleTooltipVisibilityChange}
-            screenshotCount={screenshots.length}
-            credits={credits}
-            currentLanguage={currentLanguage}
-            setLanguage={setLanguage}
-          />
-        </div>
-      </div>
+      <QueueCommands
+        onTooltipVisibilityChange={handleTooltipVisibilityChange}
+        onPanelToggle={setIsPanelOpen}
+        screenshotCount={screenshots.length}
+        credits={credits}
+        currentLanguage={currentLanguage}
+        setLanguage={setLanguage}
+      />
     </div>
   )
 }

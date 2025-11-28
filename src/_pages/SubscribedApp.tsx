@@ -125,7 +125,7 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
   }, [view])
 
   return (
-    <div ref={containerRef} className="min-h-0 flex flex-col h-full">
+    <div ref={containerRef} className="min-h-0">
       {view === "queue" ? (
         <Queue
           setView={setView}

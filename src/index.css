@@ -2,127 +2,178 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 263.4 70% 50.4%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
-    --radius: 0.75rem;
+/* Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
 }
 
-@layer base {
-    * {
-        @apply border-border;
-    }
-
-    body {
-        @apply bg-background text-foreground font-sans antialiased;
-        background-image:
-            radial-gradient(at 0% 0%, rgba(124, 58, 237, 0.15) 0px, transparent 50%),
-            radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
-            radial-gradient(at 100% 100%, rgba(236, 72, 153, 0.15) 0px, transparent 50%),
-            radial-gradient(at 0% 100%, rgba(16, 185, 129, 0.15) 0px, transparent 50%);
-        background-attachment: fixed;
-    }
+.frosted-glass {
+  background: rgba(26, 26, 26, 0.8);
+  backdrop-filter: blur(8px);
 }
 
-@layer components {
-    .frosted-glass {
-        background-color: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(24px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-    }
-
-    .glass-card {
-        background-color: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 0.75rem;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-        transition: all 0.3s ease-in-out;
-    }
-
-    .glass-card:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-        border-color: rgba(255, 255, 255, 0.2);
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-        transform: scale(1.01);
-    }
-
-    .premium-gradient-text {
-        background-clip: text;
-        -webkit-background-clip: text;
-        color: transparent;
-        background-image: linear-gradient(to right, #818cf8, #c084fc, #f472b6);
-        background-size: 200% 200%;
-        animation: gradient-x 3s ease infinite;
-    }
-
-    .auth-button {
-        position: relative;
-        overflow: hidden;
-        border-radius: 0.5rem;
-        background-color: rgba(255, 255, 255, 0.1);
-        padding: 0.75rem 1.5rem;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: white;
-        transition: all 0.3s ease-in-out;
-    }
-
-    .auth-button:hover {
-        background-color: rgba(255, 255, 255, 0.2);
-        transform: scale(1.05);
-        box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
-    }
-
-    .auth-button::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        z-index: -10;
-        background-image: linear-gradient(to right, #6366f1, #a855f7, #ec4899);
-        opacity: 0;
-        transition: opacity 0.3s ease-in-out;
-    }
-
-    .auth-button:hover::before {
-        opacity: 0.2;
-    }
+.auth-button {
+  background: rgba(252, 252, 252, 0.98);
+  color: rgba(60, 60, 60, 0.9);
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
 }
 
-/* Custom Scrollbar */
+.auth-button:hover {
+  background: rgba(255, 255, 255, 1);
+}
+
+.auth-button::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  background: linear-gradient(45deg, #ff000000, #0000ff00);
+  z-index: -1;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: inherit;
+  filter: blur(24px);
+  opacity: 0;
+}
+
+.auth-button:hover::before {
+  background: linear-gradient(45deg,
+      rgba(255, 0, 0, 0.4),
+      rgba(0, 0, 255, 0.4));
+  filter: blur(48px);
+  inset: -16px;
+  opacity: 1;
+}
+
+/* Modern Custom Scrollbar */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-    background-color: transparent;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 9999px;
-    transition: background-color 0.3s;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.15));
+  border-radius: 4px;
+  transition: background 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.25));
+}
+
+/* Custom scrollbar for specific elements */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Modern Button Styles */
+.modern-button {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modern-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s ease, height 0.6s ease;
+}
+
+.modern-button:hover::before {
+  width: 300%;
+  height: 300%;
+}
+
+/* Theme Variables */
+:root {
+  --theme-glass-bg: rgba(17, 24, 39, 0.95);
+  --theme-glass-border: rgba(255, 255, 255, 0.1);
+  --theme-overlay-bg: rgba(17, 24, 39, 0.92);
+  --theme-button-bg: rgba(31, 41, 55, 0.90);
+  --theme-button-hover: rgba(55, 65, 81, 0.90);
+}
+
+/* Glassmorphism Panel */
+.glass-panel {
+  background: var(--theme-glass-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--theme-glass-border);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+/* Solution Overlay - non-interactive by default */
+.solution-overlay {
+  background: var(--theme-overlay-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  pointer-events: none;
+}
+
+/* Interactive elements within overlays */
+.interactive {
+  pointer-events: auto;
+}
+
+/* Smooth Transitions */
+.smooth-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Glow Effect */
+.glow-effect {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+/* Focus Styles for Accessibility */
+.focusable:focus {
+  outline: 2px solid rgba(59, 130, 246, 0.6);
+  outline-offset: 2px;
+}
+
+.focusable:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.8);
+  outline-offset: 2px;
+}
+
+/* Subtle Pulse Animation */
+@keyframes soft-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.soft-pulse {
+  animation: soft-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

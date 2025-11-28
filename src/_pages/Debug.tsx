@@ -8,6 +8,7 @@ import SolutionCommands from "../components/Solutions/SolutionCommands"
 import { Screenshot } from "../types/screenshots"
 import { ComplexitySection, ContentSection } from "./Solutions"
 import { useToast } from "../contexts/toast"
+import { normalizeScreenshotsResponse } from "../utils/screenshots"
 
 const CodeSection = ({
   title,
@@ -32,6 +33,7 @@ const CodeSection = ({
       </div>
     ) : (
       <div className="w-full">
+        {/* @ts-ignore */}
         <SyntaxHighlighter
           showLineNumbers
           language={currentLanguage == "golang" ? "go" : currentLanguage}
@@ -57,7 +59,8 @@ async function fetchScreenshots(): Promise<Screenshot[]> {
   try {
     const existing = await window.electronAPI.getScreenshots()
     console.log("Raw screenshot data in Debug:", existing)
-    return (Array.isArray(existing) ? existing : []).map((p) => ({
+    const previews = normalizeScreenshotsResponse(existing)
+    return previews.map((p) => ({
       id: p.path,
       path: p.path,
       preview: p.preview,

@@ -1,8 +1,15 @@
 // ipcHandlers.ts
 
-import { ipcMain, shell } from "electron"
+import { ipcMain, shell, app } from "electron"
 import { randomBytes } from "crypto"
-import { IIpcHandlerDeps } from "./main"
+import {
+  IIpcHandlerDeps
+} from "./main"
+import Store from "electron-store"
+
+const store = new Store()
+
+
 
 export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   console.log("Initializing IPC handlers")
@@ -92,10 +99,10 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
         )
       }
 
-      return previews
+      return { success: true, previews }
     } catch (error) {
       console.error("Error getting screenshots:", error)
-      throw error
+      return { success: false, previews: [], error: String(error) }
     }
   })
 
@@ -157,15 +164,6 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     }
   })
 
-  ipcMain.handle("reset-queues", async () => {
-    try {
-      deps.clearQueues()
-      return { success: true }
-    } catch (error) {
-      console.error("Error resetting queues:", error)
-      return { error: "Failed to reset queues" }
-    }
-  })
 
   // Process screenshot handlers
   ipcMain.handle("trigger-process-screenshots", async () => {
@@ -196,6 +194,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
         // Send reset events in sequence
         mainWindow.webContents.send("reset-view")
         mainWindow.webContents.send("reset")
+        deps.resetWindowPosition()
       }
 
       return { success: true }
@@ -244,5 +243,70 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       console.error("Error moving window down:", error)
       return { error: "Failed to move window down" }
     }
+  })
+
+  ipcMain.handle("reset-queues", async () => {
+    try {
+      deps.clearQueues()
+      return { success: true }
+    } catch (error) {
+      console.error("Error resetting queues:", error)
+      return { error: "Failed to reset queues" }
+    }
+  })
+
+  // API Key handlers
+  ipcMain.handle("set-api-key", async (event, apiKey: string) => {
+    try {
+      store.set("GEMINI_API_KEY", apiKey)
+      return { success: true }
+    } catch (error) {
+      console.error("Error setting API key:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("get-api-key", async () => {
+    try {
+      const apiKey = store.get("GEMINI_API_KEY")
+      return { success: true, apiKey }
+    } catch (error) {
+      console.error("Error getting API key:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("get-model", async () => {
+    try {
+      const model = store.get("GEMINI_MODEL")
+      return { success: true, model }
+    } catch (error) {
+      console.error("Error getting model:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("set-model", async (event, model: string) => {
+    try {
+      store.set("GEMINI_MODEL", model)
+      return { success: true }
+    } catch (error) {
+      console.error("Error setting model:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("set-window-focusable", (event, focusable: boolean) => {
+    try {
+      deps.setWindowFocusable(focusable)
+      return { success: true }
+    } catch (error) {
+      console.error("Error setting window focusable:", error)
+      return { error: "Failed to set window focusable" }
+    }
+  })
+
+  ipcMain.handle("quit-app", () => {
+    app.quit()
   })
 }

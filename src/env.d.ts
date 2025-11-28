@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { ToastMessage } from "./components/ui/toast"
+
 
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string
@@ -59,6 +59,15 @@ interface ElectronAPI {
   installUpdate: () => void
   onUpdateAvailable: (callback: (info: any) => void) => () => void
   onUpdateDownloaded: (callback: (info: any) => void) => () => void
+  // Add API key and window management methods
+  setApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  getApiKey: () => Promise<{ success: boolean; apiKey?: string; error?: string }>
+  getModel: () => Promise<{ success: boolean; model?: string; error?: string }>
+  setModel: (model: string) => Promise<{ success: boolean; error?: string }>
+  setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
+  quitApp: () => void
+  getPlatform: () => string
+  onOutOfCredits: (callback: () => void) => () => void
 }
 
 interface Window {

@@ -14,19 +14,19 @@ export function initAutoUpdater() {
   // If we're in development mode, simulate update events for testing
   if (!app.isPackaged || !process.env.GH_TOKEN) {
     console.log("Auto updater: Development mode, update notifications disabled")
-    
+
     // Disable all update events
     ipcMain.handle("start-update", async () => {
       console.log("Update download requested, but updates are disabled")
       return { success: true }
     })
-    
+
     ipcMain.handle("install-update", () => {
       console.log("Update installation requested, but updates are disabled")
     })
-    
+
     // No simulated update events will be sent
-    
+
     return
   }
 
@@ -112,7 +112,7 @@ export function initAutoUpdater() {
       return { success: true }
     } catch (error) {
       console.error("Failed to start update:", error)
-      return { success: false, error: error.message }
+      return { success: false, error: (error as any).message }
     }
   })
 

@@ -4,13 +4,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
 
-import ScreenshotQueue from "../components/Queue/ScreenshotQueue"
-
 import { ProblemStatementData } from "../types/solutions"
 import SolutionCommands from "../components/Solutions/SolutionCommands"
 import Debug from "./Debug"
 import { useToast } from "../contexts/toast"
 import { COMMAND_KEY } from "../utils/platform"
+import { normalizeScreenshotsResponse } from "../utils/screenshots"
 
 export const ContentSection = ({
   title,
@@ -21,7 +20,7 @@ export const ContentSection = ({
   content: React.ReactNode
   isLoading: boolean
 }) => (
-  <div className="space-y-2">
+  <div className="space-y-2 w-full">
     <h2 className="text-[13px] font-medium text-white tracking-wide">
       {title}
     </h2>
@@ -32,7 +31,7 @@ export const ContentSection = ({
         </p>
       </div>
     ) : (
-      <div className="text-[13px] leading-[1.4] text-gray-100 max-w-[600px]">
+      <div className="text-[13px] leading-[1.4] text-gray-100 w-full">
         {content}
       </div>
     )}
@@ -49,7 +48,7 @@ const SolutionSection = ({
   isLoading: boolean
   currentLanguage: string
 }) => (
-  <div className="space-y-2">
+  <div className="space-y-2 w-full">
     <h2 className="text-[13px] font-medium text-white tracking-wide">
       {title}
     </h2>
@@ -63,6 +62,7 @@ const SolutionSection = ({
       </div>
     ) : (
       <div className="w-full">
+        {/* @ts-ignore */}
         <SyntaxHighlighter
           showLineNumbers
           language={currentLanguage == "golang" ? "go" : currentLanguage}
@@ -93,7 +93,7 @@ export const ComplexitySection = ({
   spaceComplexity: string | null
   isLoading: boolean
 }) => (
-  <div className="space-y-2">
+  <div className="space-y-2 w-full">
     <h2 className="text-[13px] font-medium text-white tracking-wide">
       Complexity
     </h2>
@@ -148,6 +148,7 @@ const Solutions: React.FC<SolutionsProps> = ({
   const [tooltipHeight, setTooltipHeight] = useState(0)
 
   const [isResetting, setIsResetting] = useState(false)
+  const [currentModel, setCurrentModel] = useState<string>("")
 
   interface Screenshot {
     id: string
@@ -163,7 +164,8 @@ const Solutions: React.FC<SolutionsProps> = ({
       try {
         const existing = await window.electronAPI.getScreenshots()
         console.log("Raw screenshot data:", existing)
-        const screenshots = (Array.isArray(existing) ? existing : []).map(
+        const previews = normalizeScreenshotsResponse(existing)
+        const screenshots = previews.map(
           (p) => ({
             id: p.path,
             path: p.path,
@@ -179,20 +181,30 @@ const Solutions: React.FC<SolutionsProps> = ({
       }
     }
 
+    const fetchModel = async () => {
+      try {
+        const result = await window.electronAPI.getModel()
+        if (result.success && result.model) {
+          setCurrentModel(result.model)
+        }
+      } catch (error) {
+        console.error("Error loading model:", error)
+      }
+    }
+
     fetchScreenshots()
+    fetchModel()
   }, [solutionData])
 
   const { showToast } = useToast()
 
   useEffect(() => {
-    // Height update logic
+    // Height update logic - send actual content height without restrictions
     const updateDimensions = () => {
       if (contentRef.current) {
-        let contentHeight = contentRef.current.scrollHeight
+        const contentHeight = contentRef.current.scrollHeight
         const contentWidth = contentRef.current.scrollWidth
-        if (isTooltipVisible) {
-          contentHeight += tooltipHeight
-        }
+        // Send full dimensions - don't add tooltip height separately
         window.electronAPI.updateContentDimensions({
           width: contentWidth,
           height: contentHeight
@@ -205,6 +217,8 @@ const Solutions: React.FC<SolutionsProps> = ({
     if (contentRef.current) {
       resizeObserver.observe(contentRef.current)
     }
+    
+    // Initial update
     updateDimensions()
 
     // Set up event listeners
@@ -212,7 +226,8 @@ const Solutions: React.FC<SolutionsProps> = ({
       window.electronAPI.onScreenshotTaken(async () => {
         try {
           const existing = await window.electronAPI.getScreenshots()
-          const screenshots = (Array.isArray(existing) ? existing : []).map(
+          const previews = normalizeScreenshotsResponse(existing)
+          const screenshots = previews.map(
             (p) => ({
               id: p.path,
               path: p.path,
@@ -304,13 +319,13 @@ const Solutions: React.FC<SolutionsProps> = ({
         const fetchScreenshots = async () => {
           try {
             const existing = await window.electronAPI.getScreenshots()
-            const screenshots =
-              existing.previews?.map((p) => ({
-                id: p.path,
-                path: p.path,
-                preview: p.preview,
-                timestamp: Date.now()
-              })) || []
+            const previews = normalizeScreenshotsResponse(existing)
+            const screenshots = previews.map((p) => ({
+              id: p.path,
+              path: p.path,
+              preview: p.preview,
+              timestamp: Date.now()
+            }))
             setExtraScreenshots(screenshots)
           } catch (error) {
             console.error("Error loading extra screenshots:", error)
@@ -361,7 +376,7 @@ const Solutions: React.FC<SolutionsProps> = ({
       resizeObserver.disconnect()
       cleanupFunctions.forEach((cleanup) => cleanup())
     }
-  }, [isTooltipVisible, tooltipHeight])
+  }, []) // Remove isTooltipVisible and tooltipHeight dependencies
 
   useEffect(() => {
     setProblemStatementData(
@@ -410,7 +425,8 @@ const Solutions: React.FC<SolutionsProps> = ({
       if (response.success) {
         // Fetch and update screenshots after successful deletion
         const existing = await window.electronAPI.getScreenshots()
-        const screenshots = (Array.isArray(existing) ? existing : []).map(
+        const previews = normalizeScreenshotsResponse(existing)
+        const screenshots = previews.map(
           (p) => ({
             id: p.path,
             path: p.path,
@@ -439,100 +455,103 @@ const Solutions: React.FC<SolutionsProps> = ({
           setLanguage={setLanguage}
         />
       ) : (
-        <div ref={contentRef} className="relative space-y-3 px-4 py-3">
-          {/* Conditionally render the screenshot queue if solutionData is available */}
-          {solutionData && (
-            <div className="bg-transparent w-fit">
-              <div className="pb-3">
-                <div className="space-y-3 w-fit">
-                  <ScreenshotQueue
-                    isLoading={debugProcessing}
-                    screenshots={extraScreenshots}
-                    onDeleteScreenshot={handleDeleteExtraScreenshot}
-                  />
+        // Main container - USE FULL WIDTH
+        <div ref={contentRef} className="w-full min-w-0 px-4 py-3">
+          {/* Pill/Commands row */}
+          <div className="mb-3">
+            <SolutionCommands
+              onTooltipVisibilityChange={handleTooltipVisibilityChange}
+              isProcessing={!problemStatementData || !solutionData}
+              extraScreenshots={extraScreenshots}
+              credits={credits}
+              currentLanguage={currentLanguage}
+              setLanguage={setLanguage}
+              onDeleteScreenshot={handleDeleteExtraScreenshot}
+            />
+          </div>
+
+          {/* Main Content - FULL WIDTH */}
+          <div className="w-full solution-overlay rounded-lg">
+            <div className="px-4 py-3 space-y-4">
+              {/* Model indicator at top */}
+              {currentModel && (
+                <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                  <span className="text-[10px] text-white/50 uppercase tracking-wider font-medium">
+                    Powered by {currentModel}
+                  </span>
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {/* Navbar of commands with the SolutionsHelper */}
-          <SolutionCommands
-            onTooltipVisibilityChange={handleTooltipVisibilityChange}
-            isProcessing={!problemStatementData || !solutionData}
-            extraScreenshots={extraScreenshots}
-            credits={credits}
-            currentLanguage={currentLanguage}
-            setLanguage={setLanguage}
-          />
+              {!solutionData && (
+                <>
+                  <ContentSection
+                    title="Problem Statement"
+                    content={problemStatementData?.problem_statement}
+                    isLoading={!problemStatementData}
+                  />
+                  {problemStatementData && (
+                    <div className="mt-4 flex">
+                      <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
+                        Generating solutions...
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
 
-          {/* Main Content - Modified width constraints */}
-          <div className="w-full text-sm text-black bg-black/60 rounded-md">
-            <div className="rounded-lg overflow-hidden">
-              <div className="px-4 py-3 space-y-4 max-w-full">
-                {!solutionData && (
-                  <>
+              {solutionData && (
+                <>
+                  {shortAnswerData && shortAnswerData.trim() !== "" && (
                     <ContentSection
-                      title="Problem Statement"
-                      content={problemStatementData?.problem_statement}
-                      isLoading={!problemStatementData}
+                      title="Short Answer"
+                      content={shortAnswerData}
+                      isLoading={false}
                     />
-                    {problemStatementData && (
-                      <div className="mt-4 flex">
-                        <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-                          Generating solutions...
-                        </p>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {solutionData && (
-                  <>
-                    {/* Display Short Answer if available and not empty */}
-                    {shortAnswerData && shortAnswerData.trim() !== "" && (
-                       <ContentSection
-                         title="Short Answer"
-                         content={shortAnswerData}
-                         isLoading={false} // Already loaded if solutionData exists
-                       />
-                     )}
-                    <ContentSection
-                      title={`Explanation (${COMMAND_KEY} + Arrow keys to scroll)`} // Renamed from "My Thoughts"
-                      content={
-                        thoughtsData && (
-                          <div className="space-y-3">
-                            <div className="space-y-1">
-                              {thoughtsData.map((thought, index) => (
-                                <div
-                                  key={index}
-                                  className="flex items-start gap-2"
-                                >
-                                  <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-                                  <div>{thought}</div>
-                                </div>
-                              ))}
+                  )}
+                  <ContentSection
+                    title={`Explanation (${COMMAND_KEY}+↑↓ to move window)`}
+                    content={
+                      thoughtsData && (
+                        <div className="space-y-2">
+                          {thoughtsData.map((thought, index) => (
+                            <div
+                              key={index}
+                              className="flex items-start gap-2"
+                            >
+                              <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
+                              <div>{thought}</div>
                             </div>
-                          </div>
-                        )
-                      }
-                      isLoading={!thoughtsData}
-                    />
+                          ))}
+                        </div>
+                      )
+                    }
+                    isLoading={!thoughtsData}
+                  />
 
-                    <SolutionSection
-                      title="Solution"
-                      content={solutionData}
-                      isLoading={!solutionData}
-                      currentLanguage={currentLanguage}
-                    />
+                  <SolutionSection
+                    title="Solution"
+                    content={solutionData}
+                    isLoading={!solutionData}
+                    currentLanguage={currentLanguage}
+                  />
 
-                    <ComplexitySection
-                      timeComplexity={timeComplexityData}
-                      spaceComplexity={spaceComplexityData}
-                      isLoading={!timeComplexityData || !spaceComplexityData}
-                    />
-                  </>
-                )}
-              </div>
+                  <ComplexitySection
+                    timeComplexity={timeComplexityData}
+                    spaceComplexity={spaceComplexityData}
+                    isLoading={!timeComplexityData || !spaceComplexityData}
+                  />
+                </>
+              )}
+
+              {/* Bottom hint */}
+              {solutionData && (
+                <div className="pt-3 border-t border-white/10">
+                  <p className="text-[10px] text-white/30 text-center">
+                    Use {COMMAND_KEY}+↑/↓ to move window • {COMMAND_KEY}+← /→ to move horizontally
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
