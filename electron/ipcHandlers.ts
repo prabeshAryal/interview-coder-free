@@ -309,4 +309,53 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   ipcMain.handle("quit-app", () => {
     app.quit()
   })
+
+  // ==================== Voice Assistant Handlers ====================
+  
+  ipcMain.handle("start-voice-recording", async () => {
+    try {
+      const result = await deps.voiceHelper?.startRecording()
+      return result || { success: false, error: "Voice helper not initialized" }
+    } catch (error) {
+      console.error("Error starting voice recording:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("stop-voice-recording", async () => {
+    try {
+      const result = await deps.voiceHelper?.stopRecording()
+      return result || { success: false, error: "Voice helper not initialized" }
+    } catch (error) {
+      console.error("Error stopping voice recording:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("toggle-voice-recording", async () => {
+    try {
+      deps.voiceHelper?.toggleRecording()
+      return { success: true, isRecording: deps.voiceHelper?.getIsRecording() || false }
+    } catch (error) {
+      console.error("Error toggling voice recording:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("process-voice-audio", async (event, audioBase64: string) => {
+    try {
+      const result = await deps.voiceHelper?.processAudioData(audioBase64)
+      return result || { success: false, error: "Voice helper not initialized" }
+    } catch (error) {
+      console.error("Error processing voice audio:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle("get-voice-recording-status", () => {
+    return { 
+      success: true, 
+      isRecording: deps.voiceHelper?.getIsRecording() || false 
+    }
+  })
 }

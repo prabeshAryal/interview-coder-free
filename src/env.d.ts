@@ -68,6 +68,18 @@ interface ElectronAPI {
   quitApp: () => void
   getPlatform: () => string
   onOutOfCredits: (callback: () => void) => () => void
+  
+  // Voice assistant methods
+  startVoiceRecording: () => Promise<{ success: boolean; error?: string }>
+  stopVoiceRecording: () => Promise<{ success: boolean; error?: string }>
+  toggleVoiceRecording: () => Promise<{ success: boolean; isRecording?: boolean; error?: string }>
+  processVoiceAudio: (audioBase64: string) => Promise<{ success: boolean; data?: any; error?: string }>
+  getVoiceRecordingStatus: () => Promise<{ success: boolean; isRecording: boolean }>
+  onVoiceRecordingStarted: (callback: () => void) => () => void
+  onVoiceRecordingStopped: (callback: () => void) => () => void
+  onVoiceTranscriptionComplete: (callback: (data: { transcription: string }) => void) => () => void
+  onVoiceResponse: (callback: (data: { transcription: string; response: string }) => void) => () => void
+  onVoiceError: (callback: (error: string) => void) => () => void
 }
 
 interface Window {

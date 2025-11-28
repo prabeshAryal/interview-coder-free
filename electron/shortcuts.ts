@@ -79,6 +79,12 @@ export class ShortcutsHelper {
       this.deps.toggleMainWindow()
     })
 
+    // Voice recording toggle shortcut (Cmd/Ctrl + Shift + V)
+    globalShortcut.register("CommandOrControl+Shift+V", () => {
+      console.log("Command/Ctrl + Shift + V pressed. Toggling voice recording.")
+      this.deps.toggleVoiceRecording()
+    })
+
     // Unregister shortcuts when quitting
     app.on("will-quit", () => {
       globalShortcut.unregisterAll()

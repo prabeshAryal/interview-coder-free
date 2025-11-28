@@ -229,8 +229,43 @@ const electronAPI = {
   getPlatform: () => process.platform,
   setApiKey: (apiKey: string) => ipcRenderer.invoke("set-api-key", apiKey),
   getApiKey: () => ipcRenderer.invoke("get-api-key"),
+  getModel: () => ipcRenderer.invoke("get-model"),
+  setModel: (model: string) => ipcRenderer.invoke("set-model", model),
   setWindowFocusable: (focusable: boolean) => ipcRenderer.invoke("set-window-focusable", focusable),
-  quitApp: () => ipcRenderer.invoke("quit-app")
+  quitApp: () => ipcRenderer.invoke("quit-app"),
+
+  // Voice recording methods
+  startVoiceRecording: () => ipcRenderer.invoke("start-voice-recording"),
+  stopVoiceRecording: () => ipcRenderer.invoke("stop-voice-recording"),
+  toggleVoiceRecording: () => ipcRenderer.invoke("toggle-voice-recording"),
+  processVoiceAudio: (audioBase64: string) => ipcRenderer.invoke("process-voice-audio", audioBase64),
+  getVoiceRecordingStatus: () => ipcRenderer.invoke("get-voice-recording-status"),
+  
+  onVoiceRecordingStarted: (callback: () => void) => {
+    const subscription = () => callback();
+    ipcRenderer.on("voice-recording-started", subscription);
+    return () => ipcRenderer.removeListener("voice-recording-started", subscription);
+  },
+  onVoiceRecordingStopped: (callback: () => void) => {
+    const subscription = () => callback();
+    ipcRenderer.on("voice-recording-stopped", subscription);
+    return () => ipcRenderer.removeListener("voice-recording-stopped", subscription);
+  },
+  onVoiceTranscriptionComplete: (callback: (data: { transcription: string }) => void) => {
+    const subscription = (_: any, data: { transcription: string }) => callback(data);
+    ipcRenderer.on("voice-transcription-complete", subscription);
+    return () => ipcRenderer.removeListener("voice-transcription-complete", subscription);
+  },
+  onVoiceResponse: (callback: (data: { transcription: string; response: string }) => void) => {
+    const subscription = (_: any, data: { transcription: string; response: string }) => callback(data);
+    ipcRenderer.on("voice-response", subscription);
+    return () => ipcRenderer.removeListener("voice-response", subscription);
+  },
+  onVoiceError: (callback: (error: string) => void) => {
+    const subscription = (_: any, error: string) => callback(error);
+    ipcRenderer.on("voice-error", subscription);
+    return () => ipcRenderer.removeListener("voice-error", subscription);
+  }
 } as ElectronAPI
 
 

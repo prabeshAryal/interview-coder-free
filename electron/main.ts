@@ -4,6 +4,7 @@ import { initializeIpcHandlers } from "./ipcHandlers"
 import { ProcessingHelper } from "./ProcessingHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
+import { VoiceHelper } from "./VoiceHelper"
 import { initAutoUpdater } from "./autoUpdater"
 import * as dotenv from "dotenv"
 
@@ -35,6 +36,7 @@ const state = {
   screenshotHelper: null as ScreenshotHelper | null,
   shortcutsHelper: null as ShortcutsHelper | null,
   processingHelper: null as ProcessingHelper | null,
+  voiceHelper: null as VoiceHelper | null,
 
   // View and state management
   view: "queue" as "queue" | "solutions" | "debug",
@@ -91,6 +93,7 @@ export interface IShortcutsHelperDeps {
   moveWindowRight: () => void
   moveWindowUp: () => void
   moveWindowDown: () => void
+  toggleVoiceRecording: () => void
 }
 
 export interface IIpcHandlerDeps {
@@ -103,6 +106,7 @@ export interface IIpcHandlerDeps {
   ) => Promise<{ success: boolean; error?: string }>
   getImagePreview: (filepath: string) => Promise<string>
   processingHelper: ProcessingHelper | null
+  voiceHelper: VoiceHelper | null
   PROCESSING_EVENTS: typeof state.PROCESSING_EVENTS
   takeScreenshot: () => Promise<string>
   getView: () => "queue" | "solutions" | "debug"
@@ -211,6 +215,26 @@ function initializeHelpers() {
     getHasDebugged,
     PROCESSING_EVENTS: state.PROCESSING_EVENTS
   } as IProcessingHelperDeps)
+  
+  // Initialize voice helper
+  state.voiceHelper = new VoiceHelper({
+    getMainWindow,
+    getProblemInfo,
+    setView,
+    getLanguage: async () => {
+      const mainWindow = getMainWindow()
+      if (!mainWindow) return "python"
+      try {
+        const language = await mainWindow.webContents.executeJavaScript(
+          "window.__LANGUAGE__"
+        )
+        return language || "python"
+      } catch {
+        return "python"
+      }
+    }
+  })
+  
   state.shortcutsHelper = new ShortcutsHelper({
     getMainWindow,
     takeScreenshot,
@@ -232,7 +256,8 @@ function initializeHelpers() {
         )
       ),
     moveWindowUp: () => moveWindowVertical((y) => y - state.step),
-    moveWindowDown: () => moveWindowVertical((y) => y + state.step)
+    moveWindowDown: () => moveWindowVertical((y) => y + state.step),
+    toggleVoiceRecording: () => state.voiceHelper?.toggleRecording()
   } as IShortcutsHelperDeps)
 }
 
@@ -249,17 +274,17 @@ async function createWindow(): Promise<void> {
   state.screenWidth = workArea.width
   state.screenHeight = workArea.height
   state.step = 60
+  
   const initialWidth = 760
   const initialHeight = 600
   const horizontalInset = 40
   const verticalInset = 24
   const leftAnchor = Math.max(workArea.x + horizontalInset, workArea.x)
-  const maxAnchorX =
-    workArea.x + workArea.width - initialWidth - horizontalInset
+  const maxAnchorX = workArea.x + workArea.width - initialWidth - horizontalInset
   const safeAnchorX = Math.min(leftAnchor, Math.max(workArea.x, maxAnchorX))
-  const bottomAnchor =
-    workArea.y + workArea.height - initialHeight - verticalInset
+  const bottomAnchor = workArea.y + workArea.height - initialHeight - verticalInset
   const safeBottomY = Math.max(workArea.y, bottomAnchor)
+
   state.initialX = safeAnchorX
   state.initialY = safeBottomY
   state.currentX = state.initialX
@@ -330,7 +355,7 @@ async function createWindow(): Promise<void> {
     return { action: "deny" }
   })
 
-  // Enhanced screen capture resistance
+  // Enhanced screen capture resistance - MAXIMUM PROTECTION
   state.mainWindow.setContentProtection(true)
 
   state.mainWindow.setVisibleOnAllWorkspaces(true, {
@@ -348,13 +373,23 @@ async function createWindow(): Promise<void> {
     // Prevent window from being included in window switcher
     state.mainWindow.setSkipTaskbar(true)
 
-    // Disable window shadow
+    // Disable window shadow - helps avoid detection
     state.mainWindow.setHasShadow(false)
+    
+    // Additional protection: Set window level to floating
+    state.mainWindow.setAlwaysOnTop(true, 'floating', 1)
   }
 
   // Prevent the window from being captured by screen recording
   state.mainWindow.webContents.setBackgroundThrottling(false)
   state.mainWindow.webContents.setFrameRate(60)
+  
+  // Re-apply content protection after any changes
+  setInterval(() => {
+    if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+      state.mainWindow.setContentProtection(true)
+    }
+  }, 5000)
 
   // Set up window listeners
   state.mainWindow.on("move", handleWindowMove)
@@ -476,11 +511,15 @@ function moveWindowVertical(updateFn: (y: number) => number): void {
   const maxDownLimit = state.screenHeight - 100 // Keep at least 100px visible at bottom
 
   if (newY >= maxUpLimit && newY <= maxDownLimit) {
+    const direction = newY < state.currentY ? 'up' : 'down'
     state.currentY = newY
     state.mainWindow.setPosition(
       Math.round(state.currentX),
       Math.round(state.currentY)
     )
+    
+    // Notify renderer to scroll content in the same direction
+    state.mainWindow.webContents.send('scroll-content', direction)
   }
 }
 
@@ -524,8 +563,8 @@ function setWindowDimensions(width: number, height: number): void {
     const primaryDisplay = screen.getPrimaryDisplay()
     const workArea = primaryDisplay.workArea
 
-    // Pill mode: taller to accommodate settings panel above
-    const PILL_WIDTH = 420
+    // Pill mode: wider to accommodate voice controls
+    const PILL_WIDTH = 520
     const PILL_HEIGHT = 380 // Increased height for settings panel
 
     // Solution mode: use most of the screen width
@@ -548,9 +587,15 @@ function setWindowDimensions(width: number, height: number): void {
     }
 
     // CENTER the window horizontally
-    const centerX = workArea.x + Math.round((workArea.width - finalWidth) / 2)
+    let centerX = workArea.x + Math.round((workArea.width - finalWidth) / 2)
+    
+    // Ensure window is not positioned off-screen with a safe margin
+    const SAFE_MARGIN = 40
+    centerX = Math.max(workArea.x + SAFE_MARGIN, centerX)
+    centerX = Math.min(workArea.x + workArea.width - finalWidth - SAFE_MARGIN, centerX)
+
     // Position at bottom with some padding
-    const bottomY = workArea.y + workArea.height - finalHeight - 24
+    const bottomY = workArea.y + workArea.height - finalHeight - 40
 
     state.currentX = centerX
     state.currentY = bottomY
@@ -594,6 +639,7 @@ async function initializeApp() {
       deleteScreenshot,
       getImagePreview,
       processingHelper: state.processingHelper,
+      voiceHelper: state.voiceHelper,
       PROCESSING_EVENTS: state.PROCESSING_EVENTS,
       takeScreenshot,
       getView,

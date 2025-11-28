@@ -3,6 +3,11 @@ import React, { useState, useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
+import rehypeKatex from "rehype-katex"
+import "katex/dist/katex.min.css"
 
 import { ProblemStatementData } from "../types/solutions"
 import SolutionCommands from "../components/Solutions/SolutionCommands"
@@ -10,6 +15,72 @@ import Debug from "./Debug"
 import { useToast } from "../contexts/toast"
 import { COMMAND_KEY } from "../utils/platform"
 import { normalizeScreenshotsResponse } from "../utils/screenshots"
+
+// Markdown renderer component for consistent styling
+const MarkdownContent: React.FC<{ content: string }> = ({ content }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm, remarkMath]}
+    rehypePlugins={[rehypeKatex]}
+    components={{
+      code({ node, inline, className, children, ...props }: any) {
+        const match = /language-(\w+)/.exec(className || "")
+        const language = match ? match[1] : ""
+
+        return !inline && language ? (
+          <SyntaxHighlighter
+            style={dracula}
+            language={language}
+            PreTag="div"
+            customStyle={{
+              margin: "0.5rem 0",
+              borderRadius: "8px",
+              fontSize: "12px",
+              backgroundColor: "rgba(0, 0, 0, 0.3)",
+            }}
+            {...props}
+          >
+            {String(children).replace(/\n$/, "")}
+          </SyntaxHighlighter>
+        ) : (
+          <code
+            className="bg-white/10 px-1.5 py-0.5 rounded text-emerald-400 font-mono text-xs"
+            {...props}
+          >
+            {children}
+          </code>
+        )
+      },
+      p: ({ children }) => (
+        <p className="mb-2 text-white/85 leading-relaxed">{children}</p>
+      ),
+      h1: ({ children }) => (
+        <h1 className="text-lg font-bold mb-2 text-white mt-3">{children}</h1>
+      ),
+      h2: ({ children }) => (
+        <h2 className="text-base font-semibold mb-2 text-white mt-2">{children}</h2>
+      ),
+      h3: ({ children }) => (
+        <h3 className="text-sm font-medium mb-1 text-white/90 mt-1">{children}</h3>
+      ),
+      ul: ({ children }) => (
+        <ul className="list-disc list-inside mb-2 space-y-1 text-white/80">{children}</ul>
+      ),
+      ol: ({ children }) => (
+        <ol className="list-decimal list-inside mb-2 space-y-1 text-white/80">{children}</ol>
+      ),
+      li: ({ children }) => <li className="text-white/80">{children}</li>,
+      blockquote: ({ children }) => (
+        <blockquote className="border-l-4 border-indigo-500 pl-3 italic text-white/70 my-2">
+          {children}
+        </blockquote>
+      ),
+      strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+      em: ({ children }) => <em className="italic text-white/90">{children}</em>,
+    }}
+  >
+    {content}
+  </ReactMarkdown>
+)
 
 export const ContentSection = ({
   title,
@@ -20,23 +91,24 @@ export const ContentSection = ({
   content: React.ReactNode
   isLoading: boolean
 }) => (
-  <div className="space-y-2 w-full">
-    <h2 className="text-[13px] font-medium text-white tracking-wide">
+  <div className="space-y-2 w-full slide-up">
+    <h2 className="text-xs font-medium text-white/60 uppercase tracking-wider flex items-center gap-2">
+      <div className="w-0.5 h-3 rounded-full bg-indigo-500" />
       {title}
     </h2>
     {isLoading ? (
-      <div className="mt-4 flex">
-        <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-          Extracting problem statement...
-        </p>
+      <div className="mt-3 flex items-center gap-2">
+        <div className="w-3 h-3 rounded-full border-2 border-white/20 border-t-indigo-500 animate-spin" />
+        <p className="text-sm text-white/50">Extracting...</p>
       </div>
     ) : (
-      <div className="text-[13px] leading-[1.4] text-gray-100 w-full">
-        {content}
+      <div className="text-[13px] leading-relaxed text-white/80 w-full">
+        {typeof content === "string" ? <MarkdownContent content={content} /> : content}
       </div>
     )}
   </div>
 )
+
 const SolutionSection = ({
   title,
   content,
@@ -48,20 +120,18 @@ const SolutionSection = ({
   isLoading: boolean
   currentLanguage: string
 }) => (
-  <div className="space-y-2 w-full">
-    <h2 className="text-[13px] font-medium text-white tracking-wide">
+  <div className="space-y-2 w-full slide-up">
+    <h2 className="text-xs font-medium text-white/60 uppercase tracking-wider flex items-center gap-2">
+      <div className="w-0.5 h-3 rounded-full bg-emerald-500" />
       {title}
     </h2>
     {isLoading ? (
-      <div className="space-y-1.5">
-        <div className="mt-4 flex">
-          <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-            Loading solutions...
-          </p>
-        </div>
+      <div className="mt-3 flex items-center gap-2">
+        <div className="w-3 h-3 rounded-full border-2 border-white/20 border-t-emerald-500 animate-spin" />
+        <p className="text-sm text-white/50">Loading...</p>
       </div>
     ) : (
-      <div className="w-full">
+      <div className="w-full code-block overflow-hidden">
         {/* @ts-ignore */}
         <SyntaxHighlighter
           showLineNumbers
@@ -73,7 +143,9 @@ const SolutionSection = ({
             padding: "1rem",
             whiteSpace: "pre-wrap",
             wordBreak: "break-all",
-            backgroundColor: "rgba(22, 27, 34, 0.5)"
+            backgroundColor: "transparent",
+            fontSize: "12px",
+            lineHeight: "1.6"
           }}
           wrapLongLines={true}
         >
@@ -93,27 +165,25 @@ export const ComplexitySection = ({
   spaceComplexity: string | null
   isLoading: boolean
 }) => (
-  <div className="space-y-2 w-full">
-    <h2 className="text-[13px] font-medium text-white tracking-wide">
+  <div className="space-y-2 w-full slide-up">
+    <h2 className="text-xs font-medium text-white/60 uppercase tracking-wider flex items-center gap-2">
+      <div className="w-0.5 h-3 rounded-full bg-amber-500" />
       Complexity
     </h2>
     {isLoading ? (
-      <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-        Calculating complexity...
-      </p>
+      <div className="flex items-center gap-2">
+        <div className="w-3 h-3 rounded-full border-2 border-white/20 border-t-amber-500 animate-spin" />
+        <p className="text-sm text-white/50">Calculating...</p>
+      </div>
     ) : (
-      <div className="space-y-1">
-        <div className="flex items-start gap-2 text-[13px] leading-[1.4] text-gray-100">
-          <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-          <div>
-            <strong>Time:</strong> {timeComplexity}
-          </div>
+      <div className="flex gap-3">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+          <span className="text-xs font-medium text-blue-400">Time:</span>
+          <span className="text-sm text-white/80">{timeComplexity}</span>
         </div>
-        <div className="flex items-start gap-2 text-[13px] leading-[1.4] text-gray-100">
-          <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-          <div>
-            <strong>Space:</strong> {spaceComplexity}
-          </div>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+          <span className="text-xs font-medium text-purple-400">Space:</span>
+          <span className="text-sm text-white/80">{spaceComplexity}</span>
         </div>
       </div>
     )}
@@ -246,11 +316,22 @@ const Solutions: React.FC<SolutionsProps> = ({
 
         // Remove queries
         queryClient.removeQueries({
+          queryKey: ["problem_statement"]
+        })
+        queryClient.removeQueries({
           queryKey: ["solution"]
         })
         queryClient.removeQueries({
           queryKey: ["new_solution"]
         })
+        
+        // Reset all state
+        setProblemStatementData(null)
+        setShortAnswerData(null)
+        setSolutionData(null)
+        setThoughtsData(null)
+        setTimeComplexityData(null)
+        setSpaceComplexityData(null)
 
         // Reset screenshots
         setExtraScreenshots([])
@@ -261,12 +342,17 @@ const Solutions: React.FC<SolutionsProps> = ({
         }, 0)
       }),
       window.electronAPI.onSolutionStart(() => {
-        // Every time processing starts, reset relevant states, including short answer
+        // Every time processing starts, reset ALL relevant states
+        setProblemStatementData(null); // Reset problem statement
         setShortAnswerData(null); // Reset short answer
         setSolutionData(null);
         setThoughtsData(null);
         setTimeComplexityData(null);
         setSpaceComplexityData(null);
+        
+        // Also clear the query cache for fresh start
+        queryClient.removeQueries({ queryKey: ["problem_statement"] });
+        queryClient.removeQueries({ queryKey: ["solution"] });
       }),
       window.electronAPI.onProblemExtracted((data) => {
         queryClient.setQueryData(["problem_statement"], data)
@@ -455,10 +541,10 @@ const Solutions: React.FC<SolutionsProps> = ({
           setLanguage={setLanguage}
         />
       ) : (
-        // Main container - USE FULL WIDTH
-        <div ref={contentRef} className="w-full min-w-0 px-4 py-3">
+        // Main container - Minimal Design
+        <div ref={contentRef} className="w-full min-w-0 px-4 py-4">
           {/* Pill/Commands row */}
-          <div className="mb-3">
+          <div className="mb-4">
             <SolutionCommands
               onTooltipVisibilityChange={handleTooltipVisibilityChange}
               isProcessing={!problemStatementData || !solutionData}
@@ -470,15 +556,15 @@ const Solutions: React.FC<SolutionsProps> = ({
             />
           </div>
 
-          {/* Main Content - FULL WIDTH */}
-          <div className="w-full solution-overlay rounded-lg">
-            <div className="px-4 py-3 space-y-4">
-              {/* Model indicator at top */}
+          {/* Main Content - Minimal Glass Panel */}
+          <div className="w-full glass-panel rounded-xl overflow-hidden">
+            <div className="px-4 py-4 space-y-4">
+              {/* Model indicator */}
               {currentModel && (
-                <div className="flex items-center gap-2 pb-2 border-b border-white/10">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                  <span className="text-[10px] text-white/50 uppercase tracking-wider font-medium">
-                    Powered by {currentModel}
+                <div className="flex items-center gap-2 pb-3 border-b border-white/[0.06]">
+                  <div className="w-1.5 h-1.5 rounded-full status-online"></div>
+                  <span className="text-[10px] text-white/40 uppercase tracking-wider">
+                    Powered by <span className="text-white/60">{currentModel}</span>
                   </span>
                 </div>
               )}
@@ -491,10 +577,9 @@ const Solutions: React.FC<SolutionsProps> = ({
                     isLoading={!problemStatementData}
                   />
                   {problemStatementData && (
-                    <div className="mt-4 flex">
-                      <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-                        Generating solutions...
-                      </p>
+                    <div className="mt-3 flex items-center gap-2 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                      <div className="w-4 h-4 rounded-full border-2 border-white/20 border-t-indigo-500 animate-spin" />
+                      <p className="text-sm text-white/50">Generating solutions...</p>
                     </div>
                   )}
                 </>
@@ -510,17 +595,19 @@ const Solutions: React.FC<SolutionsProps> = ({
                     />
                   )}
                   <ContentSection
-                    title={`Explanation (${COMMAND_KEY}+↑↓ to move window)`}
+                    title={`Explanation (${COMMAND_KEY}+↑↓ to move)`}
                     content={
                       thoughtsData && (
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                           {thoughtsData.map((thought, index) => (
                             <div
                               key={index}
-                              className="flex items-start gap-2"
+                              className="flex items-start gap-2 p-2 rounded-lg hover:bg-white/[0.02] transition-colors"
                             >
-                              <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-                              <div>{thought}</div>
+                              <span className="text-[10px] font-medium text-indigo-400 mt-0.5 shrink-0">{index + 1}.</span>
+                              <div className="text-white/80 text-sm flex-1">
+                                <MarkdownContent content={thought} />
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -546,10 +633,18 @@ const Solutions: React.FC<SolutionsProps> = ({
 
               {/* Bottom hint */}
               {solutionData && (
-                <div className="pt-3 border-t border-white/10">
-                  <p className="text-[10px] text-white/30 text-center">
-                    Use {COMMAND_KEY}+↑/↓ to move window • {COMMAND_KEY}+← /→ to move horizontally
-                  </p>
+                <div className="pt-3 border-t border-white/[0.04]">
+                  <div className="flex items-center justify-center gap-4 text-[10px] text-white/30">
+                    <span className="flex items-center gap-1">
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/[0.04] font-mono">{COMMAND_KEY}+↑↓</kbd>
+                      <span>Move</span>
+                    </span>
+                    <span className="w-0.5 h-0.5 rounded-full bg-white/20" />
+                    <span className="flex items-center gap-1">
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/[0.04] font-mono">{COMMAND_KEY}+←→</kbd>
+                      <span>Position</span>
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
