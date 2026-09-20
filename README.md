@@ -12,7 +12,7 @@ A free, open-source desktop application designed to help you ace technical codin
 Capture coding problems directly from your screen. Stack up to 2 screenshots to provide more context for complex, multi-part problems.
 
 ### 🤖 AI-Powered Problem Solving
-Powered by Google Gemini AI with intelligent fallback handling. The app automatically retries with different models if rate limits or network issues occur : so you never get stuck.
+Powered by Google Gemini AI. Choose Gemini 3.7 Flash or Gemini 3.8 Flash in Settings.
 
 ### 💬 Conversation Memory
 Ask follow-up questions naturally. The AI remembers your entire conversation history until you explicitly reset it, allowing for iterative problem-solving and clarifications.
@@ -42,6 +42,9 @@ Control everything with keyboard shortcuts for maximum speed. No need to click a
 | `Ctrl/Cmd + Enter` | Process screenshots and get solution |
 | `Ctrl/Cmd + R` | Reset conversation and clear history |
 | `Ctrl/Cmd + B` | Toggle window visibility (show/hide) |
+| `Ctrl/Cmd + [` | Back to screenshots without resetting |
+| `Ctrl/Cmd + ]` | Return to the current response |
+| `F1` / `Esc` | Open shortcut help / close panel (app focused) |
 | `Ctrl/Cmd + Arrow Keys` | Move window around the screen |
 | `Ctrl/Cmd + Q` | Quit the application |
 
@@ -109,7 +112,7 @@ The app uses Google Gemini AI for analyzing screenshots and generating solutions
 - Find the **"API Key"** field
 - Paste your Gemini API key and save
 
-That's it! No `.env` files or config editing required.
+Settings are saved locally through the UI. No `.env` files or config editing required. Screenshot capture preserves your visibility choice: a hidden window stays hidden.
 
 ### Tips & Best Practices
 
@@ -121,7 +124,7 @@ That's it! No `.env` files or config editing required.
 
 ## 🎯 How to Use
 
-1. **Start the app** : Run `npm run dev` or launch the built application
+1. **Start the app** : Run `npm run dev` or launch the built application. It starts hidden; press `Ctrl/Cmd + B` to show it.
 2. **Position the window** : Use `Ctrl/Cmd + Arrow Keys` to move it where you want
 3. **Take a screenshot** : Press `Ctrl/Cmd + H` to capture a coding problem
 4. **Add more context** (optional) : Take another screenshot if the problem spans multiple screens

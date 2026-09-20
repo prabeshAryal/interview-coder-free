@@ -1,48 +1,13 @@
 // Shared AI configuration constants
 // This file centralizes all Gemini API configuration to ensure consistency across the app
 
-/**
- * Available Gemini models in priority order for fallback
- * Order: Latest/most capable → most stable
- */
-export const GEMINI_MODELS = {
-  GEMINI_3_PRO_PREVIEW: "gemini-3-pro-preview",
-  GEMINI_2_5_PRO: "gemini-2.5-pro",
-  GEMINI_2_5_FLASH: "gemini-2.5-flash",
-  GEMINI_2_0_FLASH: "gemini-2.0-flash"
-} as const
-
-export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
-
-/**
- * Default model to use when no preference is set
- */
-export const DEFAULT_MODEL: GeminiModel = GEMINI_MODELS.GEMINI_2_5_FLASH
-
-/**
- * Fallback chain - ordered from highest priority to lowest
- * When a model fails (rate limit, error), we try the next one
- */
-export const MODEL_FALLBACK_ORDER: GeminiModel[] = [
-  GEMINI_MODELS.GEMINI_3_PRO_PREVIEW,
-  GEMINI_MODELS.GEMINI_2_5_PRO,
-  GEMINI_MODELS.GEMINI_2_5_FLASH,
-  GEMINI_MODELS.GEMINI_2_0_FLASH
-]
-
-/**
- * Get the fallback chain starting from a specific model
- * This ensures we try models in order, skipping any that come before the current one
- */
-export function getFallbackChain(startModel: GeminiModel): GeminiModel[] {
-  const startIndex = MODEL_FALLBACK_ORDER.indexOf(startModel)
-  if (startIndex === -1) {
-    // Unknown model, start from beginning
-    return MODEL_FALLBACK_ORDER
-  }
-  // Return models from current position onwards
-  return MODEL_FALLBACK_ORDER.slice(startIndex)
-}
+export {
+  DEFAULT_MODEL,
+  GEMINI_MODELS,
+  isGeminiModel,
+  MODEL_DISPLAY_NAMES
+} from "../src/shared/aiModels"
+export type { GeminiModel } from "../src/shared/aiModels"
 
 /**
  * Retry configuration for API calls
@@ -93,7 +58,7 @@ export function isNetworkError(error: any): boolean {
  */
 export function getErrorMessage(error: any): string {
   if (isRateLimitError(error)) {
-    return "Rate limit reached. Trying with a different model..."
+    return "Rate limit reached for Gemini 3.7 Flash. Please try again later."
   }
   if (isNetworkError(error)) {
     return "Network error. Please check your connection."
@@ -104,13 +69,6 @@ export function getErrorMessage(error: any): string {
 /**
  * Model display names for UI
  */
-export const MODEL_DISPLAY_NAMES: Record<GeminiModel, string> = {
-  [GEMINI_MODELS.GEMINI_3_PRO_PREVIEW]: "Gemini 3 Pro Preview",
-  [GEMINI_MODELS.GEMINI_2_5_PRO]: "Gemini 2.5 Pro",
-  [GEMINI_MODELS.GEMINI_2_5_FLASH]: "Gemini 2.5 Flash",
-  [GEMINI_MODELS.GEMINI_2_0_FLASH]: "Gemini 2.0 Flash"
-}
-
 /**
  * Voice recording configuration
  */
@@ -124,4 +82,4 @@ export const VOICE_CONFIG = {
 /**
  * Response language (can be customized)
  */
-export const RESPONSE_LANGUAGE = process.env.OPENAI_RESPONSE_LANGUAGE || "English"
+export const RESPONSE_LANGUAGE = "English"

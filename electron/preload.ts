@@ -95,7 +95,12 @@ export const PROCESSING_EVENTS = {
 console.log("Preload script is running")
 
 const electronAPI = {
-  updateContentDimensions: (dimensions: { width: number; height: number }) =>
+  onNavigateView: (callback: (direction: "back" | "forward") => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, direction: "back" | "forward") => callback(direction)
+    ipcRenderer.on("navigate-view", listener)
+    return () => ipcRenderer.removeListener("navigate-view", listener)
+  },
+  updateContentDimensions: (dimensions: { width: number; height: number; view?: "queue" | "solutions" }) =>
     ipcRenderer.invoke("update-content-dimensions", dimensions),
   clearStore: () => ipcRenderer.invoke("clear-store"),
   getScreenshots: () => ipcRenderer.invoke("get-screenshots"),

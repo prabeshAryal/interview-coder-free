@@ -10,7 +10,15 @@ export class ShortcutsHelper {
   }
 
   public registerShortcuts(): void {
-    globalShortcut.register("CommandOrControl+H", async () => {
+    const modifier = process.platform === "darwin" ? "Command" : "Control"
+    const register = (accelerator: string, callback: () => void | Promise<void>) => {
+      const registered = globalShortcut.register(accelerator, callback)
+      if (!registered) {
+        console.error(`Failed to register global shortcut: ${accelerator}`)
+      }
+    }
+
+    register(`${modifier}+H`, async () => {
       const mainWindow = this.deps.getMainWindow()
       if (mainWindow) {
         console.log("=== Taking screenshot (Cmd+H) ===")
@@ -30,11 +38,11 @@ export class ShortcutsHelper {
       }
     })
 
-    globalShortcut.register("CommandOrControl+Enter", async () => {
+    register(`${modifier}+Enter`, async () => {
       await this.deps.processingHelper?.processScreenshots()
     })
 
-    globalShortcut.register("CommandOrControl+R", () => {
+    register(`${modifier}+R`, () => {
       console.log(
         "Command + R pressed. Canceling requests and resetting queues..."
       )
@@ -62,35 +70,44 @@ export class ShortcutsHelper {
     })
 
     // New shortcuts for moving the window
-    globalShortcut.register("CommandOrControl+Left", () => {
+    register(`${modifier}+Left`, () => {
       console.log("Command/Ctrl + Left pressed. Moving window left.")
       this.deps.moveWindowLeft()
     })
 
-    globalShortcut.register("CommandOrControl+Right", () => {
+    register(`${modifier}+Right`, () => {
       console.log("Command/Ctrl + Right pressed. Moving window right.")
       this.deps.moveWindowRight()
     })
 
-    globalShortcut.register("CommandOrControl+Down", () => {
+    register(`${modifier}+Down`, () => {
       console.log("Command/Ctrl + down pressed. Moving window down.")
       this.deps.moveWindowDown()
     })
 
-    globalShortcut.register("CommandOrControl+Up", () => {
+    register(`${modifier}+Up`, () => {
       console.log("Command/Ctrl + Up pressed. Moving window Up.")
       this.deps.moveWindowUp()
     })
 
-    globalShortcut.register("CommandOrControl+B", () => {
+    register(`${modifier}+B`, () => {
       this.deps.toggleMainWindow()
     })
 
+    register(`${modifier}+[`, () => {
+      this.deps.getMainWindow()?.webContents.send("navigate-view", "back")
+    })
+    register(`${modifier}+]`, () => {
+      this.deps.getMainWindow()?.webContents.send("navigate-view", "forward")
+    })
+
     // Voice recording toggle shortcut (Cmd/Ctrl + Shift + V)
-    globalShortcut.register("CommandOrControl+Shift+V", () => {
+    register(`${modifier}+Shift+V`, () => {
       console.log("Command/Ctrl + Shift + V pressed. Toggling voice recording.")
       this.deps.toggleVoiceRecording()
     })
+
+    register(`${modifier}+Q`, () => app.quit())
 
     // Unregister shortcuts when quitting
     app.on("will-quit", () => {

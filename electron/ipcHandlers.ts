@@ -7,6 +7,7 @@ import {
 } from "./main"
 import Store from "electron-store"
 import { clearConversationHistory } from "./ProcessingHelper"
+import { DEFAULT_MODEL, isGeminiModel } from "./config"
 
 const store = new Store()
 
@@ -62,9 +63,9 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   // Window dimension handlers
   ipcMain.handle(
     "update-content-dimensions",
-    async (event, { width, height }: { width: number; height: number }) => {
+    async (event, { width, height, view }: { width: number; height: number; view?: "queue" | "solutions" }) => {
       if (width && height) {
-        deps.setWindowDimensions(width, height)
+        deps.setWindowDimensions(width, height, view)
       }
     }
   )
@@ -283,7 +284,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   ipcMain.handle("get-model", async () => {
     try {
       const model = store.get("GEMINI_MODEL")
-      return { success: true, model }
+      return { success: true, model: isGeminiModel(model) ? model : DEFAULT_MODEL }
     } catch (error) {
       console.error("Error getting model:", error)
       return { success: false, error: String(error) }
@@ -292,6 +293,9 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
 
   ipcMain.handle("set-model", async (event, model: string) => {
     try {
+      if (!isGeminiModel(model)) {
+        return { success: false, error: "Unsupported Gemini model." }
+      }
       store.set("GEMINI_MODEL", model)
       return { success: true }
     } catch (error) {

@@ -6,7 +6,9 @@
     "clean": "rimraf dist dist-electron",
     "dev": "cross-env NODE_ENV=production npm run clean && vite build && tsc -p tsconfig.electron.json && electron .",
     "dev:prod": "cross-env NODE_ENV=production npm run clean && vite build && tsc -p tsconfig.electron.json && electron .",
-    "build": "cross-env NODE_ENV=production rimraf dist dist-electron && vite build && tsc -p tsconfig.electron.json && electron-builder"
+    "build": "cross-env NODE_ENV=production rimraf dist dist-electron && vite build && tsc -p tsconfig.electron.json && electron-builder",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "test": "node --test tests/*.test.cjs"
   },
   "build": {
     "appId": "com.prabesh.windowsdefender",
@@ -92,15 +94,6 @@
         "releaseType": "release"
       }
     ],
-    "extraResources": [
-      {
-        "from": ".env",
-        "to": ".env",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
     "extraMetadata": {
       "main": "dist-electron/main.js"
     }
@@ -123,7 +116,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "diff": "^7.0.0",
-    "dotenv": "^16.4.7",
     "electron-log": "^5.2.4",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.3.9",

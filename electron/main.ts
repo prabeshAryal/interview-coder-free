@@ -6,9 +6,6 @@ import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
 import { VoiceHelper } from "./VoiceHelper"
 import { initAutoUpdater } from "./autoUpdater"
-import * as dotenv from "dotenv"
-
-dotenv.config()
 
 // Constants
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged
@@ -28,9 +25,7 @@ const state = {
   initialX: 40,
   initialY: 50,
 
-  // Debouncing to prevent jittering
-  lastDimensions: null as { width: number; height: number; mode: string } | null,
-  resizeTimeout: null as NodeJS.Timeout | null,
+  captureInProgress: false,
 
   // Application helpers
   screenshotHelper: null as ScreenshotHelper | null,
@@ -98,7 +93,7 @@ export interface IShortcutsHelperDeps {
 
 export interface IIpcHandlerDeps {
   getMainWindow: () => BrowserWindow | null
-  setWindowDimensions: (width: number, height: number) => void
+  setWindowDimensions: (width: number, height: number, view?: "queue" | "solutions") => void
   getScreenshotQueue: () => string[]
   getExtraScreenshotQueue: () => string[]
   deleteScreenshot: (
@@ -165,17 +160,21 @@ function clearQueues(): void {
 async function takeScreenshot(): Promise<string> {
   if (!state.mainWindow) throw new Error("No main window available")
   
-  const screenshotPath = await state.screenshotHelper?.takeScreenshot(
-    () => hideMainWindow(),
-    () => showMainWindow()
-  ) || ""
-  
-  // IMPORTANT: Sync main state view with ScreenshotHelper's view
-  // ScreenshotHelper resets to "queue" when taking a new screenshot
-  // We must also update main state so ProcessingHelper uses correct view
-  state.view = "queue"
-  
-  return screenshotPath
+  if (state.captureInProgress) throw new Error("A screenshot is already in progress")
+  if (!state.screenshotHelper) throw new Error("Screenshot helper not initialized")
+  state.captureInProgress = true
+  // Preserve the user's visibility choice while the native capture is running.
+  try {
+    const screenshotPath = await state.screenshotHelper.takeScreenshot(
+      () => state.mainWindow?.hide(),
+      () => {}
+    )
+    state.view = "queue"
+    return screenshotPath
+  } finally {
+    state.captureInProgress = false
+    if (state.isWindowVisible) showMainWindow()
+  }
 }
 
 async function getImagePreview(filepath: string): Promise<string> {
@@ -251,16 +250,9 @@ function initializeHelpers() {
     isVisible: () => state.isWindowVisible,
     toggleMainWindow,
     moveWindowLeft: () =>
-      moveWindowHorizontal((x) =>
-        Math.max(-(state.windowSize?.width || 0) / 2, x - state.step)
-      ),
+      moveWindowHorizontal((x) => x - state.step),
     moveWindowRight: () =>
-      moveWindowHorizontal((x) =>
-        Math.min(
-          state.screenWidth - (state.windowSize?.width || 0) / 2,
-          x + state.step
-        )
-      ),
+      moveWindowHorizontal((x) => x + state.step),
     moveWindowUp: () => moveWindowVertical((y) => y - state.step),
     moveWindowDown: () => moveWindowVertical((y) => y + state.step),
     toggleVoiceRecording: () => state.voiceHelper?.toggleRecording()
@@ -281,15 +273,15 @@ async function createWindow(): Promise<void> {
   state.screenHeight = workArea.height
   state.step = 60
   
-  const initialWidth = 760
-  const initialHeight = 600
+  const initialWidth = Math.min(520, workArea.width)
+  const initialHeight = Math.min(160, workArea.height)
   const horizontalInset = 40
   const verticalInset = 24
   const leftAnchor = Math.max(workArea.x + horizontalInset, workArea.x)
   const maxAnchorX = workArea.x + workArea.width - initialWidth - horizontalInset
-  const safeAnchorX = Math.min(leftAnchor, Math.max(workArea.x, maxAnchorX))
+  const safeAnchorX = workArea.x + Math.round((workArea.width - initialWidth) / 2)
   const bottomAnchor = workArea.y + workArea.height - initialHeight - verticalInset
-  const safeBottomY = Math.max(workArea.y, bottomAnchor)
+  const safeBottomY = workArea.y + Math.min(verticalInset, Math.max(0, workArea.height - initialHeight))
 
   state.initialX = safeAnchorX
   state.initialY = safeBottomY
@@ -309,7 +301,7 @@ async function createWindow(): Promise<void> {
         : path.join(__dirname, "preload.js"),
       scrollBounce: true
     },
-    show: true,
+    show: false,
     frame: false,
     transparent: true,
     fullscreenable: false,
@@ -320,7 +312,7 @@ async function createWindow(): Promise<void> {
     type: "panel",
     paintWhenInitiallyHidden: true,
     titleBarStyle: "hidden",
-    enableLargerThanScreen: true,
+    enableLargerThanScreen: false,
     movable: true
   }
 
@@ -390,13 +382,6 @@ async function createWindow(): Promise<void> {
   state.mainWindow.webContents.setBackgroundThrottling(false)
   state.mainWindow.webContents.setFrameRate(60)
   
-  // Re-apply content protection after any changes
-  setInterval(() => {
-    if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-      state.mainWindow.setContentProtection(true)
-    }
-  }, 5000)
-
   // Set up window listeners
   state.mainWindow.on("move", handleWindowMove)
   state.mainWindow.on("resize", handleWindowResize)
@@ -408,7 +393,7 @@ async function createWindow(): Promise<void> {
   state.windowSize = { width: bounds.width, height: bounds.height }
   state.currentX = bounds.x
   state.currentY = bounds.y
-  state.isWindowVisible = true
+  state.isWindowVisible = false
 }
 
 function handleWindowMove(): void {
@@ -436,18 +421,9 @@ function handleWindowClosed(): void {
 function setWindowFocusable(focusable: boolean): void {
   const win = state.mainWindow
   if (win && !win.isDestroyed()) {
-    // Always keep mouse events enabled for the pill area
-    // Only control focusability for keyboard input
-    if (focusable) {
-      win.setIgnoreMouseEvents(false)
-    } else {
-      // Use forward: true to allow click-through except on interactive elements
-      win.setIgnoreMouseEvents(true, { forward: true })
-    }
-    
-    // Maintain always on top
-    win.setAlwaysOnTop(true, 'screen-saver', 1)
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    // Visible controls must remain clickable even when settings are closed.
+    win.setIgnoreMouseEvents(false)
+    if (focusable && state.isWindowVisible && !state.captureInProgress) win.focus()
   }
 }
 
@@ -463,7 +439,6 @@ function hideMainWindow(): void {
     win.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true
     })
-    win.setOpacity(0)
     win.hide()
     state.isWindowVisible = false
   }
@@ -472,22 +447,14 @@ function hideMainWindow(): void {
 function showMainWindow(): void {
   const win = state.mainWindow
   if (win && !win.isDestroyed()) {
-    if (state.windowPosition && state.windowSize) {
-      win.setBounds({
-        ...state.windowPosition,
-        ...state.windowSize
-      })
-    }
     win.setIgnoreMouseEvents(false)
     win.setAlwaysOnTop(true, "screen-saver", 1)
     win.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true
     })
     win.setContentProtection(true)
-    win.setOpacity(0)
-    win.showInactive()
-    win.setOpacity(1)
     state.isWindowVisible = true
+    if (!state.captureInProgress) win.show()
   }
 }
 
@@ -495,38 +462,21 @@ function toggleMainWindow(): void {
   state.isWindowVisible ? hideMainWindow() : showMainWindow()
 }
 
-// Window movement functions
+// Keep the window reachable on its current display.
 function moveWindowHorizontal(updateFn: (x: number) => number): void {
-  if (!state.mainWindow) return
-  state.currentX = updateFn(state.currentX)
-  state.mainWindow.setPosition(
-    Math.round(state.currentX),
-    Math.round(state.currentY)
-  )
+  const win = state.mainWindow
+  if (!win || win.isDestroyed()) return
+  const bounds = win.getBounds()
+  const area = screen.getDisplayMatching(bounds).workArea
+  win.setPosition(Math.round(Math.max(area.x, Math.min(updateFn(bounds.x), area.x + area.width - bounds.width))), bounds.y)
 }
 
 function moveWindowVertical(updateFn: (y: number) => number): void {
-  if (!state.mainWindow) return
-
-  const newY = updateFn(state.currentY)
-  const windowHeight = state.windowSize?.height || 0
-  
-  // Allow window to move much further - can go almost entirely off screen
-  // This lets user "scroll" through tall content by moving window up/down
-  const maxUpLimit = -(windowHeight - 100) // Can go almost fully off top
-  const maxDownLimit = state.screenHeight - 100 // Keep at least 100px visible at bottom
-
-  if (newY >= maxUpLimit && newY <= maxDownLimit) {
-    const direction = newY < state.currentY ? 'up' : 'down'
-    state.currentY = newY
-    state.mainWindow.setPosition(
-      Math.round(state.currentX),
-      Math.round(state.currentY)
-    )
-    
-    // Notify renderer to scroll content in the same direction
-    state.mainWindow.webContents.send('scroll-content', direction)
-  }
+  const win = state.mainWindow
+  if (!win || win.isDestroyed()) return
+  const bounds = win.getBounds()
+  const area = screen.getDisplayMatching(bounds).workArea
+  win.setPosition(bounds.x, Math.round(Math.max(area.y, Math.min(updateFn(bounds.y), area.y + area.height - bounds.height))))
 }
 
 function resetWindowPosition(): void {
@@ -548,94 +498,27 @@ function resetWindowPosition(): void {
   state.currentX = safeX
   state.currentY = safeY
   state.mainWindow.setPosition(safeX, safeY)
-  try {
-    dotenv.config()
-    console.log("Environment variables loaded:", {
-      NODE_ENV: process.env.NODE_ENV,
-      // Remove Supabase references
-      OPEN_AI_API_KEY: process.env.OPEN_AI_API_KEY ? "exists" : "missing"
-    })
-  } catch (error) {
-    console.error("Error loading environment variables:", error)
-  }
+
 }
 
-// Window dimension functions  
-function setWindowDimensions(width: number, height: number): void {
-  if (!state.mainWindow?.isDestroyed()) {
-    const isSolutionMode = state.view === "solutions" || state.view === "debug"
-    const mode = isSolutionMode ? "solution" : "pill"
-
-    const primaryDisplay = screen.getPrimaryDisplay()
-    const workArea = primaryDisplay.workArea
-
-    // Pill mode: wider to accommodate voice controls
-    const PILL_WIDTH = 520
-    const PILL_HEIGHT = 380 // Increased height for settings panel
-
-    // Solution mode: use most of the screen width
-    const SOLUTION_MIN_WIDTH = 650
-    const SOLUTION_MAX_WIDTH = Math.min(950, workArea.width - 80)
-    const SOLUTION_WIDTH = Math.max(SOLUTION_MIN_WIDTH, Math.min(width + 80, SOLUTION_MAX_WIDTH))
-    
-    // Height based on content, allow it to be tall
-    const SOLUTION_HEIGHT = Math.max(height + 80, 500)
-
-    let finalWidth: number
-    let finalHeight: number
-
-    if (isSolutionMode) {
-      finalWidth = SOLUTION_WIDTH
-      finalHeight = SOLUTION_HEIGHT
-    } else {
-      finalWidth = PILL_WIDTH
-      finalHeight = PILL_HEIGHT
-    }
-
-    // CENTER the window horizontally
-    let centerX = workArea.x + Math.round((workArea.width - finalWidth) / 2)
-    
-    // Ensure window is not positioned off-screen with a safe margin
-    const SAFE_MARGIN = 40
-    centerX = Math.max(workArea.x + SAFE_MARGIN, centerX)
-    centerX = Math.min(workArea.x + workArea.width - finalWidth - SAFE_MARGIN, centerX)
-
-    // Position at bottom with some padding
-    const bottomY = workArea.y + workArea.height - finalHeight - 40
-
-    state.currentX = centerX
-    state.currentY = bottomY
-
-    if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-      state.mainWindow.setBounds({
-        x: centerX,
-        y: bottomY,
-        width: finalWidth,
-        height: finalHeight
-      })
-    }
-    state.windowSize = { width: finalWidth, height: finalHeight }
-    state.lastDimensions = { width: finalWidth, height: finalHeight, mode }
-  }
-}
-
-// Environment setup
-function loadEnvVariables() {
-  try {
-    dotenv.config()
-    console.log("Environment variables loaded:", {
-      NODE_ENV: process.env.NODE_ENV,
-      OPEN_AI_API_KEY: process.env.OPEN_AI_API_KEY ? "exists" : "missing"
-    })
-  } catch (error) {
-    console.error("Error loading environment variables:", error)
-  }
+// Clamp content to the current display; overflowing content scrolls in the renderer.
+function setWindowDimensions(width: number, height: number, view?: "queue" | "solutions"): void {
+  const win = state.mainWindow
+  if (!win || win.isDestroyed() || !Number.isFinite(width) || !Number.isFinite(height)) return
+  const bounds = win.getBounds()
+  const area = screen.getDisplayMatching(bounds).workArea
+  const solution = (view ?? state.view) !== "queue"
+  const finalWidth = Math.min(solution ? 900 : 520, area.width)
+  const finalHeight = Math.min(Math.max(Math.ceil(height), solution ? 500 : 160), area.height)
+  const x = Math.max(area.x, Math.min(bounds.x + Math.round((bounds.width - finalWidth) / 2), area.x + area.width - finalWidth))
+  const y = Math.max(area.y, Math.min(bounds.y, area.y + area.height - finalHeight))
+  if (bounds.width === finalWidth && bounds.height === finalHeight && bounds.x === x && bounds.y === y) return
+  win.setBounds({ x, y, width: finalWidth, height: finalHeight })
 }
 
 // Initialize application
 async function initializeApp() {
   try {
-    loadEnvVariables()
     initializeHelpers()
     initializeIpcHandlers({
       getMainWindow,
@@ -654,16 +537,9 @@ async function initializeApp() {
       setView,
       setHasDebugged,
       moveWindowLeft: () =>
-        moveWindowHorizontal((x) =>
-          Math.max(-(state.windowSize?.width || 0) / 2, x - state.step)
-        ),
+        moveWindowHorizontal((x) => x - state.step),
       moveWindowRight: () =>
-        moveWindowHorizontal((x) =>
-          Math.min(
-            state.screenWidth - (state.windowSize?.width || 0) / 2,
-            x + state.step
-          )
-        ),
+        moveWindowHorizontal((x) => x + state.step),
       moveWindowUp: () => moveWindowVertical((y) => y - state.step),
       moveWindowDown: () => moveWindowVertical((y) => y + state.step),
       setWindowFocusable,

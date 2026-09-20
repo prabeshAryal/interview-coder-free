@@ -10,11 +10,11 @@ import rehypeKatex from "rehype-katex"
 import "katex/dist/katex.min.css"
 
 import { ProblemStatementData } from "../types/solutions"
-import SolutionCommands from "../components/Solutions/SolutionCommands"
 import Debug from "./Debug"
 import { useToast } from "../contexts/toast"
 import { COMMAND_KEY } from "../utils/platform"
 import { normalizeScreenshotsResponse } from "../utils/screenshots"
+import { MODEL_DISPLAY_NAMES, isGeminiModel } from "../shared/aiModels"
 
 // Markdown renderer component for consistent styling
 const MarkdownContent: React.FC<{ content: string }> = ({ content }) => (
@@ -192,13 +192,11 @@ export const ComplexitySection = ({
 
 export interface SolutionsProps {
   setView: (view: "queue" | "solutions" | "debug") => void
-  credits: number
   currentLanguage: string
   setLanguage: (language: string) => void
 }
 const Solutions: React.FC<SolutionsProps> = ({
   setView,
-  credits,
   currentLanguage,
   setLanguage
 }) => {
@@ -214,8 +212,11 @@ const Solutions: React.FC<SolutionsProps> = ({
   const [timeComplexityData, setTimeComplexityData] = useState<string | null>(null);
   const [spaceComplexityData, setSpaceComplexityData] = useState<string | null>(null); // Corrected syntax: removed extra closing parenthesis and duplicate line
 
-  const [isTooltipVisible, setIsTooltipVisible] = useState(false)
-  const [tooltipHeight, setTooltipHeight] = useState(0)
+  const hasCodeSolution = Boolean(solutionData?.trim())
+  const hasResponse = Boolean(
+    shortAnswerData?.trim() || thoughtsData?.some((thought) => thought.trim())
+  )
+
 
   const [isResetting, setIsResetting] = useState(false)
   const [currentModel, setCurrentModel] = useState<string>("")
@@ -281,34 +282,6 @@ const Solutions: React.FC<SolutionsProps> = ({
   const { showToast } = useToast()
 
   useEffect(() => {
-    // Height update logic - send actual content height without restrictions
-    const updateDimensions = () => {
-      if (contentRef.current) {
-        let contentHeight = contentRef.current.scrollHeight
-        let contentWidth = contentRef.current.scrollWidth
-        
-        // Ensure minimum dimensions to prevent pill from disappearing
-        // Minimum should fit the pill + some padding
-        contentWidth = Math.max(contentWidth, 120)
-        contentHeight = Math.max(contentHeight, 80)
-        
-        // Send full dimensions - don't add tooltip height separately
-        window.electronAPI.updateContentDimensions({
-          width: contentWidth,
-          height: contentHeight
-        })
-      }
-    }
-
-    // Initialize resize observer
-    const resizeObserver = new ResizeObserver(updateDimensions)
-    if (contentRef.current) {
-      resizeObserver.observe(contentRef.current)
-    }
-    
-    // Initial update
-    updateDimensions()
-
     // Set up event listeners
     const cleanupFunctions = [
       // Note: screenshot-taken is primarily handled by SubscribedApp for view switching
@@ -482,7 +455,6 @@ const Solutions: React.FC<SolutionsProps> = ({
     ]
 
     return () => {
-      resizeObserver.disconnect()
       cleanupFunctions.forEach((cleanup) => cleanup())
     }
   }, []) // Remove isTooltipVisible and tooltipHeight dependencies
@@ -491,7 +463,12 @@ const Solutions: React.FC<SolutionsProps> = ({
     setProblemStatementData(
       queryClient.getQueryData(["problem_statement"]) || null
     )
-    setSolutionData(queryClient.getQueryData(["solution"]) || null)
+    const cached = queryClient.getQueryData<{ code: string; short_answer?: string; thoughts: string[]; time_complexity: string; space_complexity: string }>(["solution"])
+    setSolutionData(cached?.code ?? null)
+    setShortAnswerData(cached?.short_answer ?? null)
+    setThoughtsData(cached?.thoughts ?? null)
+    setTimeComplexityData(cached?.time_complexity ?? null)
+    setSpaceComplexityData(cached?.space_complexity ?? null)
 
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       if (event?.query.queryKey[0] === "problem_statement") {
@@ -518,10 +495,6 @@ const Solutions: React.FC<SolutionsProps> = ({
     return () => unsubscribe()
   }, [queryClient])
 
-  const handleTooltipVisibilityChange = (visible: boolean, height: number) => {
-    setIsTooltipVisible(visible)
-    setTooltipHeight(height)
-  }
 
   const handleDeleteExtraScreenshot = async (index: number) => {
     const screenshotToDelete = extraScreenshots[index]
@@ -566,18 +539,7 @@ const Solutions: React.FC<SolutionsProps> = ({
       ) : (
         // Main container - Minimal Design
         <div ref={contentRef} className="w-full min-w-0 px-4 py-4">
-          {/* Pill/Commands row */}
-          <div className="mb-4">
-            <SolutionCommands
-              onTooltipVisibilityChange={handleTooltipVisibilityChange}
-              isProcessing={!problemStatementData || !solutionData}
-              extraScreenshots={extraScreenshots}
-              credits={credits}
-              currentLanguage={currentLanguage}
-              setLanguage={setLanguage}
-              onDeleteScreenshot={handleDeleteExtraScreenshot}
-            />
-          </div>
+
 
           {/* Main Content - Minimal Glass Panel */}
           <div className="w-full glass-panel rounded-xl overflow-hidden">
@@ -587,37 +549,51 @@ const Solutions: React.FC<SolutionsProps> = ({
                 <div className="flex items-center gap-2 pb-3 border-b border-white/[0.06]">
                   <div className="w-1.5 h-1.5 rounded-full status-online"></div>
                   <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                    Powered by <span className="text-white/60">{currentModel}</span>
+                    Powered by <span className="text-white/60">
+                      {isGeminiModel(currentModel)
+                        ? MODEL_DISPLAY_NAMES[currentModel]
+                        : currentModel}
+                    </span>
                   </span>
                 </div>
               )}
 
-              {!solutionData && (
-                <>
-                  <ContentSection
-                    title="Problem Statement"
-                    content={problemStatementData?.problem_statement}
-                    isLoading={!problemStatementData}
-                  />
-                  {problemStatementData && (
-                    <div className="mt-3 flex items-center gap-2 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                      <div className="w-4 h-4 rounded-full border-2 border-white/20 border-t-indigo-500 animate-spin" />
-                      <p className="text-sm text-white/50">Generating solutions...</p>
-                    </div>
-                  )}
-                </>
+              <ContentSection
+                title="Problem Statement"
+                content={problemStatementData?.problem_statement}
+                isLoading={!problemStatementData}
+              />
+              {!hasResponse && problemStatementData && (
+                <div className="mt-3 flex items-center gap-2 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                  <div className="w-4 h-4 rounded-full border-2 border-white/20 border-t-indigo-500 animate-spin" />
+                  <p className="text-sm text-white/50">Generating answer...</p>
+                </div>
               )}
 
-              {solutionData && (
+              {hasResponse && (
                 <>
-                  {shortAnswerData && shortAnswerData.trim() !== "" && (
+                  {!hasCodeSolution && (
+                    <ContentSection
+                      title="Answer"
+                      content={
+                        <div className="space-y-2">
+                          {shortAnswerData && <MarkdownContent content={shortAnswerData} />}
+                          {thoughtsData?.map((thought, index) => (
+                            <MarkdownContent key={index} content={thought} />
+                          ))}
+                        </div>
+                      }
+                      isLoading={false}
+                    />
+                  )}
+                  {hasCodeSolution && shortAnswerData && shortAnswerData.trim() !== "" && (
                     <ContentSection
                       title="Short Answer"
                       content={shortAnswerData}
                       isLoading={false}
                     />
                   )}
-                  <ContentSection
+                  {hasCodeSolution && <ContentSection
                     title={`Explanation (${COMMAND_KEY}+↑↓ to move)`}
                     content={
                       thoughtsData && (
@@ -637,25 +613,25 @@ const Solutions: React.FC<SolutionsProps> = ({
                       )
                     }
                     isLoading={!thoughtsData}
-                  />
+                  />}
 
-                  <SolutionSection
+                  {hasCodeSolution && <SolutionSection
                     title="Solution"
                     content={solutionData}
                     isLoading={!solutionData}
                     currentLanguage={currentLanguage}
-                  />
+                  />}
 
-                  <ComplexitySection
+                  {hasCodeSolution && <ComplexitySection
                     timeComplexity={timeComplexityData}
                     spaceComplexity={spaceComplexityData}
                     isLoading={!timeComplexityData || !spaceComplexityData}
-                  />
+                  />}
                 </>
               )}
 
               {/* Bottom hint */}
-              {solutionData && (
+              {hasCodeSolution && (
                 <div className="pt-3 border-t border-white/[0.04]">
                   <div className="flex items-center justify-center gap-4 text-[10px] text-white/30">
                     <span className="flex items-center gap-1">

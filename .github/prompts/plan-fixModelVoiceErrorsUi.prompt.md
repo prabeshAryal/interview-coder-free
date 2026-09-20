@@ -4,7 +4,7 @@ This plan addresses 6 key issues: missing model display, voice code duplication,
 
 ## Steps
 
-1. **Unify AI configuration constants** - Create a shared config in `electron/config.ts` (new file) with default model (`gemini-2.5-flash`), model list, and retry settings. Update `ProcessingHelper.ts` (line 55) and `VoiceHelper.ts` (line 117) to import from this shared config.
+1. **Unify AI configuration constants** - Keep the supported models (`gemini-3.7-flash` and `gemini-3.8-flash`) in the shared AI model configuration and use them from `ProcessingHelper.ts`, `VoiceHelper.ts`, and the settings UI.
 
 2. **Add rate limit handling with fallback** - Modify `callAIWithFallback()` in `ProcessingHelper.ts` (lines 47-96) to detect HTTP 429 errors, add exponential backoff retry (2-5 seconds), and emit user-friendly error messages instead of throwing. Add silent fallback to next model without crashing.
 

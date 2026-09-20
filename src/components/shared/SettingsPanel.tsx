@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react"
 import { Settings, Eye, EyeOff, Save, Check, LogOut, ChevronDown, Cpu, Key, Languages } from "lucide-react"
+import { DEFAULT_MODEL, GEMINI_MODEL_OPTIONS, isGeminiModel } from "../../shared/aiModels"
 
 interface SettingsPanelProps {
     currentLanguage: string
@@ -14,11 +15,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const [showApiKey, setShowApiKey] = useState(false)
     const [isEditing, setIsEditing] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
+    const [saveError, setSaveError] = useState("")
     const [saveSuccess, setSaveSuccess] = useState(false)
 
     const [isLanguageOpen, setIsLanguageOpen] = useState(false)
     const [isModelOpen, setIsModelOpen] = useState(false)
-    const [currentModel, setCurrentModel] = useState("gemini-2.5-flash")
+    const [currentModel, setCurrentModel] = useState<string>(DEFAULT_MODEL)
 
     const dropdownRef = useRef<HTMLDivElement>(null)
     const modelDropdownRef = useRef<HTMLDivElement>(null)
@@ -36,14 +38,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         { id: "r", label: "R" }
     ]
 
-    const models = [
-        { id: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview" },
-        // { id: "gemini-3-pro", label: "Gemini 3 Pro" },
-        { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-        { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-        { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" }
-    ]
-
     useEffect(() => {
         // Load existing API key and Model
         const loadSettings = async () => {
@@ -55,7 +49,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                 // Load model preference
                 const modelResult = await window.electronAPI.getModel()
-                if (modelResult.success && modelResult.model) {
+                if (modelResult.success && isGeminiModel(modelResult.model)) {
                     setCurrentModel(modelResult.model)
                 }
             } catch (error) {
@@ -90,27 +84,35 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
     const handleModelSelect = async (modelId: string) => {
         try {
+            const result = await window.electronAPI.setModel(modelId)
+            if (!result.success) throw new Error(result.error || "Could not save model")
             setCurrentModel(modelId)
-            await window.electronAPI.setModel(modelId)
+            setSaveError("")
             setIsModelOpen(false)
         } catch (error) {
-            console.error("Error updating model preference:", error)
+            setSaveError("Could not save the selected model. Please try again.")
         }
     }
 
     const handleSaveApiKey = async () => {
+        setSaveError("")
+        if (!apiKey.trim()) {
+            setSaveError("Enter a Gemini API key before saving.")
+            return
+        }
         setIsSaving(true)
         try {
-            const result = await window.electronAPI.setApiKey(apiKey)
+            const result = await window.electronAPI.setApiKey(apiKey.trim())
             if (result.success) {
                 setSaveSuccess(true)
                 setTimeout(() => setSaveSuccess(false), 2000)
                 setIsEditing(false)
+                setShowApiKey(false)
             } else {
-                console.error("Failed to save API key:", result.error)
+                setSaveError(result.error || "Could not save API key.")
             }
         } catch (error) {
-            console.error("Error saving API key:", error)
+            setSaveError("Could not save API key. Please try again.")
         } finally {
             setIsSaving(false)
         }
@@ -174,14 +176,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         className="w-full flex items-center justify-between bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-xs transition-all duration-200 cursor-interactive"
                     >
                         <span className="text-white/90 truncate">
-                            {models.find(m => m.id === currentModel)?.label || currentModel}
+                            {GEMINI_MODEL_OPTIONS.find(m => m.id === currentModel)?.label || currentModel}
                         </span>
                         <ChevronDown className={`w-3.5 h-3.5 text-white/50 transition-transform duration-200 ${isModelOpen ? "rotate-180" : ""}`} />
                     </button>
 
                     {isModelOpen && (
                         <div className="absolute left-0 right-0 top-full mt-1 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl overflow-hidden z-50 py-1 max-h-48 overflow-y-auto custom-scrollbar">
-                            {models.map((model) => (
+                            {GEMINI_MODEL_OPTIONS.map((model) => (
                                 <button
                                     key={model.id}
                                     onClick={() => handleModelSelect(model.id)}
@@ -219,6 +221,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="space-y-2">
                         <div className="relative">
                             <input
+                                aria-label="Gemini API key"
                                 type={showApiKey ? "text" : "password"}
                                 value={apiKey}
                                 onChange={(e) => setApiKey(e.target.value)}
@@ -226,6 +229,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                 className="w-full bg-white/5 rounded-lg px-3 py-2 text-xs outline-none border border-white/10 focus:border-white/30 pr-8 text-white placeholder-white/30 transition-colors"
                             />
                             <button
+                                aria-label={showApiKey ? "Hide API key" : "Show API key"}
                                 onClick={() => setShowApiKey(!showApiKey)}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-white/50 hover:text-white/80 cursor-interactive"
                             >
@@ -262,6 +266,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </div>
                 )}
             </div>
+
+            {saveError && <p role="alert" className="text-xs text-red-300">{saveError}</p>}
+            {saveSuccess && <p role="status" className="text-xs text-emerald-300">API key saved.</p>}
 
             {/* Divider */}
             <div className="h-px bg-white/10 my-2" />

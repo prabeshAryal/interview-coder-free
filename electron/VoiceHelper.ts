@@ -3,7 +3,7 @@ import { BrowserWindow } from "electron"
 import Store from "electron-store"
 import {
   DEFAULT_MODEL,
-  getFallbackChain,
+  isGeminiModel,
   isRateLimitError,
   isNetworkError,
   getErrorMessage,
@@ -132,12 +132,13 @@ export class VoiceHelper {
       }
 
       // Get the selected model from store, default to configured default
-      const userModel = (store.get("GEMINI_MODEL") as string as GeminiModel) || DEFAULT_MODEL
-      const models = getFallbackChain(userModel)
+      const storedModel = store.get("GEMINI_MODEL")
+      const userModel: GeminiModel = isGeminiModel(storedModel) ? storedModel : DEFAULT_MODEL
+      const models = [userModel]
       
-      console.log("Using model for voice:", userModel, "with fallback chain:", models)
+      console.log("Using model for voice:", userModel)
 
-      // First transcribe the audio using Gemini with fallback
+      // First transcribe the audio using Gemini
       let transcription = ""
       let successfulModel = userModel
       
@@ -209,22 +210,22 @@ export class VoiceHelper {
         problem_statement: `**Voice Question:** ${transcription}`
       })
 
-      const systemPrompt = `You are a helpful coding interview assistant. The user is asking a question via voice about coding problems or algorithms.
-Provide clear, concise answers. If they're asking about code, provide examples in ${language}.
-Be conversational but focused on helping them understand and solve coding problems.${contextPrompt}
+      const systemPrompt = `You are a helpful, human-sounding coding interview assistant. The user is asking a question via voice.
+Provide a clear, concise answer in natural conversational language. If the question needs code, provide examples in ${language}; otherwise do not provide code.
+For conceptual, definition, comparison, yes/no, or casual questions, answer directly in one or two friendly sentences instead of forcing a coding explanation.${contextPrompt}
 
 You MUST respond in JSON format with the following structure:
 {
-  "short_answer": "A brief, direct answer to the question (1-2 sentences). Set to null if not applicable.",
+  "short_answer": "A brief, direct, human-sounding answer (1-2 sentences). Set to null if not applicable.",
   "code": "Code solution if applicable, otherwise empty string. Use ${language} language.",
-  "thoughts": ["Array of strings explaining your reasoning step by step"],
+  "thoughts": ["A concise human-readable explanation; for non-code questions, use one or two natural sentences and do not expose private chain-of-thought."],
   "time_complexity": "Time complexity if code is provided, otherwise 'N/A'",
   "space_complexity": "Space complexity if code is provided, otherwise 'N/A'"
 }
 
 IMPORTANT: Return ONLY valid JSON, no markdown code fences or other text.`
 
-      // Now get AI response to the transcribed question with fallback
+      // Now get AI response to the transcribed question
       let rawResponse = ""
       
       for (const modelName of models) {

@@ -103,11 +103,11 @@ export class ScreenshotHelper {
       $bitmap = New-Object System.Drawing.Bitmap $screen.Bounds.Width, $screen.Bounds.Height
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
       $graphics.CopyFromScreen($screen.Bounds.X, $screen.Bounds.Y, 0, 0, $bitmap.Size)
-      $bitmap.Save('${tmpPath.replace(/\\/g, "\\\\")}')
+      $bitmap.Save('${tmpPath.replace(/'/g, "''")}')
       $graphics.Dispose()
       $bitmap.Dispose()
     `
-    await execFileAsync("powershell", ["-command", script])
+    await execFileAsync("powershell", ["-NoProfile", "-NonInteractive", "-command", script], { windowsHide: true })
     const buffer = await fs.promises.readFile(tmpPath)
     await fs.promises.unlink(tmpPath)
     return buffer

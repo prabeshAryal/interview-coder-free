@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from "react"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
 import ScreenshotQueue from "../components/Queue/ScreenshotQueue"
-import SolutionCommands from "../components/Solutions/SolutionCommands"
 import { Screenshot } from "../types/screenshots"
 import { ComplexitySection, ContentSection } from "./Solutions"
 import { useToast } from "../contexts/toast"
@@ -85,8 +84,6 @@ const Debug: React.FC<DebugProps> = ({
   currentLanguage,
   setLanguage
 }) => {
-  const [tooltipVisible, setTooltipVisible] = useState(false)
-  const [tooltipHeight, setTooltipHeight] = useState(0)
   const { showToast } = useToast()
 
   const { data: screenshots = [], refetch } = useQuery<Screenshot[]>({
@@ -148,37 +145,11 @@ const Debug: React.FC<DebugProps> = ({
       })
     ]
 
-    // Set up resize observer
-    const updateDimensions = () => {
-      if (contentRef.current) {
-        let contentHeight = contentRef.current.scrollHeight
-        const contentWidth = contentRef.current.scrollWidth
-        if (tooltipVisible) {
-          contentHeight += tooltipHeight
-        }
-        window.electronAPI.updateContentDimensions({
-          width: contentWidth,
-          height: contentHeight
-        })
-      }
-    }
-
-    const resizeObserver = new ResizeObserver(updateDimensions)
-    if (contentRef.current) {
-      resizeObserver.observe(contentRef.current)
-    }
-    updateDimensions()
-
     return () => {
-      resizeObserver.disconnect()
       cleanupFunctions.forEach((cleanup) => cleanup())
     }
   }, [queryClient, setIsProcessing])
 
-  const handleTooltipVisibilityChange = (visible: boolean, height: number) => {
-    setTooltipVisible(visible)
-    setTooltipHeight(height)
-  }
 
   const handleDeleteExtraScreenshot = async (index: number) => {
     const screenshotToDelete = screenshots[index]
@@ -214,15 +185,6 @@ const Debug: React.FC<DebugProps> = ({
       </div>
 
       {/* Navbar of commands with the tooltip */}
-      <SolutionCommands
-        screenshots={screenshots}
-        onTooltipVisibilityChange={handleTooltipVisibilityChange}
-        isProcessing={isProcessing}
-        extraScreenshots={screenshots}
-        credits={window.__CREDITS__}
-        currentLanguage={currentLanguage}
-        setLanguage={setLanguage}
-      />
 
       {/* Main Content */}
       <div className="w-full text-sm text-black bg-black/60 rounded-md">

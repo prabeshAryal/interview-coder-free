@@ -1,8 +1,9 @@
 // Global type definitions for window extensions
 
 interface ElectronAPI {
+  onNavigateView: (callback: (direction: "back" | "forward") => void) => () => void
   // Window management
-  updateContentDimensions: (dimensions: { width: number; height: number }) => Promise<void>
+  updateContentDimensions: (dimensions: { width: number; height: number; view?: "queue" | "solutions" }) => Promise<void>
   setWindowDimensions: (width: number, height: number) => Promise<void>
   toggleMainWindow: () => Promise<{ success: boolean; error?: string }>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>

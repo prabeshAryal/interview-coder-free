@@ -1,170 +1,102 @@
-// file: src/components/SubscribedApp.tsx
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef, useState, useCallback } from "react"
-import Queue from "../_pages/Queue"
-import Solutions from "../_pages/Solutions"
+import { useCallback, useEffect, useRef, useState } from "react"
+import Queue from "./Queue"
+import Solutions from "./Solutions"
+import { AppToolbar, ToolbarPanel } from "../components/shared/AppToolbar"
 import { useToast } from "../contexts/toast"
+import { COMMAND_KEY } from "../utils/platform"
 
 interface SubscribedAppProps {
-  credits: number
   currentLanguage: string
   setLanguage: (language: string) => void
 }
 
-const SubscribedApp: React.FC<SubscribedAppProps> = ({
-  credits,
-  currentLanguage,
-  setLanguage
-}) => {
+const SubscribedApp: React.FC<SubscribedAppProps> = ({ currentLanguage, setLanguage }) => {
   const queryClient = useQueryClient()
   const [view, setView] = useState<"queue" | "solutions" | "debug">("queue")
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [hasResponse, setHasResponse] = useState(false)
+  const [panel, setPanel] = useState<ToolbarPanel>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
-  // Handle screenshot-taken at this level to ensure it works regardless of view
-  useEffect(() => {
-    const cleanup = window.electronAPI.onScreenshotTaken(() => {
-      console.log("SubscribedApp: screenshot-taken received, current view:", view)
-      // Don't clear solution history - preserve until user presses Ctrl+R
-      // Just switch to queue view and refresh screenshots
-      setView("queue")
-      
-      // Use a slight delay to ensure view change completes before refetch
-      setTimeout(() => {
-        console.log("SubscribedApp: invalidating screenshots query")
-        queryClient.invalidateQueries({
-          queryKey: ["screenshots"]
-        })
-      }, 50)
-    })
-    return () => cleanup()
-  }, [view, queryClient])
-
-  // Let's ensure we reset queries etc. if some electron signals happen
-  useEffect(() => {
-    const cleanup = window.electronAPI.onResetView(() => {
-      queryClient.invalidateQueries({
-        queryKey: ["screenshots"]
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["problem_statement"]
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["solution"]
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["new_solution"]
-      })
-      setView("queue")
-    })
-
-    return () => {
-      cleanup()
-    }
+  const changeView = useCallback((next: "queue" | "solutions" | "debug") => {
+    setPanel(null)
+    setView(next)
   }, [])
 
-  // Dynamically update the window size
   useEffect(() => {
-    if (!containerRef.current) return
-
-    const updateDimensions = () => {
-      if (!containerRef.current) return
-      let height = containerRef.current.scrollHeight
-      let width = containerRef.current.scrollWidth
-      
-      // Ensure minimum dimensions to prevent window from collapsing
-      width = Math.max(width, 120)
-      height = Math.max(height, 80)
-      
-      window.electronAPI?.updateContentDimensions({ width, height })
-    }
-
-    const resizeObserver = new ResizeObserver(updateDimensions)
-    resizeObserver.observe(containerRef.current)
-
-    // Also watch DOM changes
-    const mutationObserver = new MutationObserver(updateDimensions)
-    mutationObserver.observe(containerRef.current, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      characterData: true
-    })
-
-    // Initial dimension update
-    updateDimensions()
-
-    return () => {
-      resizeObserver.disconnect()
-      mutationObserver.disconnect()
-    }
-  }, [view])
-
-  // Listen for events that might switch views or show errors
-  useEffect(() => {
-    const cleanupFunctions = [
+    const cleanups = [
+      window.electronAPI.onScreenshotTaken(() => {
+        changeView("queue")
+        queryClient.invalidateQueries({ queryKey: ["screenshots"] })
+      }),
       window.electronAPI.onSolutionStart(() => {
-        setView("solutions")
-      }),
-      window.electronAPI.onUnauthorized(() => {
-        queryClient.removeQueries({
-          queryKey: ["screenshots"]
-        })
-        queryClient.removeQueries({
-          queryKey: ["solution"]
-        })
-        queryClient.removeQueries({
-          queryKey: ["problem_statement"]
-        })
-        setView("queue")
+        setHasResponse(true)
+        changeView("solutions")
       }),
       window.electronAPI.onResetView(() => {
-        queryClient.removeQueries({
-          queryKey: ["screenshots"]
-        })
-        queryClient.removeQueries({
-          queryKey: ["solution"]
-        })
-        queryClient.removeQueries({
-          queryKey: ["problem_statement"]
-        })
-        setView("queue")
-      }),
-      window.electronAPI.onResetView(() => {
-        queryClient.setQueryData(["problem_statement"], null)
-      }),
-      window.electronAPI.onProblemExtracted((data: any) => {
-        if (view === "queue") {
-          queryClient.invalidateQueries({
-            queryKey: ["problem_statement"]
-          })
-          queryClient.setQueryData(["problem_statement"], data)
+        setHasResponse(false)
+        changeView("queue")
+        for (const key of ["screenshots", "solution", "problem_statement", "new_solution"]) {
+          queryClient.removeQueries({ queryKey: [key] })
         }
       }),
-      window.electronAPI.onSolutionError((error: string) => {
-        showToast("Error", error, "error")
-      })
+      window.electronAPI.onUnauthorized(() => changeView("queue")),
+      window.electronAPI.onSolutionError((error) => showToast("Error", error, "error"))
     ]
-    return () => cleanupFunctions.forEach((fn) => fn())
-  }, [view])
+    return () => cleanups.forEach(cleanup => cleanup())
+  }, [changeView, queryClient, showToast])
+
+  useEffect(() => {
+    return window.electronAPI.onNavigateView((direction) => {
+      if (panel) {
+        setPanel(null)
+        return
+      }
+      if (direction === "back") changeView("queue")
+      else if (hasResponse) changeView("solutions")
+    })
+  }, [panel, hasResponse, changeView])
+
+  useEffect(() => {
+    const content = contentRef.current
+    if (!content) return
+    let frame = 0
+    const measure = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        window.electronAPI.updateContentDimensions({
+          width: content.clientWidth,
+          height: Math.max(content.scrollHeight + 72, panel ? 520 : 160),
+          view: view === "queue" ? "queue" : "solutions"
+        })
+      })
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(content)
+    measure()
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [view, panel])
 
   return (
-    <div ref={containerRef} className="min-h-0">
-      {view === "queue" ? (
-        <Queue
-          setView={setView}
-          credits={credits}
-          currentLanguage={currentLanguage}
-          setLanguage={setLanguage}
-        />
-      ) : view === "solutions" ? (
-        <Solutions
-          setView={setView}
-          credits={credits}
-          currentLanguage={currentLanguage}
-          setLanguage={setLanguage}
-        />
-      ) : null}
+    <div className="app-workspace">
+      <AppToolbar currentLanguage={currentLanguage} setLanguage={setLanguage} panel={panel} setPanel={setPanel} />
+      <main className="workspace-scroll" aria-label={view === "queue" ? "Screenshots" : "Response"}>
+        <div ref={contentRef}>
+          {view === "queue" && (
+            <>
+              <Queue setView={changeView} currentLanguage={currentLanguage} setLanguage={setLanguage} />
+              <p className="px-4 pb-4 text-center text-xs text-white/60">
+                {hasResponse ? `Return to your response with ${COMMAND_KEY} + ]` : `Capture with ${COMMAND_KEY} + H · Process with ${COMMAND_KEY} + Enter`}
+              </p>
+            </>
+          )}
+          {/* Keep response state and event subscriptions alive when navigating back. */}
+          <div hidden={view === "queue"}>
+            <Solutions setView={changeView} currentLanguage={currentLanguage} setLanguage={setLanguage} />
+          </div>
+        </div>
+      </main>
     </div>
   )
 }

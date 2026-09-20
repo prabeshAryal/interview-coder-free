@@ -6,7 +6,7 @@ import { GoogleGenAI, Part } from "@google/genai"
 import Store from "electron-store"
 import {
   DEFAULT_MODEL,
-  getFallbackChain,
+  isGeminiModel,
   isRateLimitError,
   isNetworkError,
   getErrorMessage,
@@ -92,7 +92,7 @@ export class ProcessingHelper {
     }
   }
 
-  // Helper function to wrap Gemini calls with fallback and logging
+  // Helper function to wrap Gemini calls with retry and logging
   private async callAIWithFallback(
     context: string,
     systemInstruction: string,
@@ -111,10 +111,10 @@ export class ProcessingHelper {
     }
 
     // Get user's preferred model from store, default to configured default
-    const userModel = (store.get("GEMINI_MODEL") as string as GeminiModel) || DEFAULT_MODEL
+    const storedModel = store.get("GEMINI_MODEL")
+    const userModel: GeminiModel = isGeminiModel(storedModel) ? storedModel : DEFAULT_MODEL
     
-    // Get the fallback chain starting from user's preferred model
-    const models = getFallbackChain(userModel)
+    const models = [userModel]
     
     let lastError: any
     let successfulModel: string | null = null
@@ -245,11 +245,6 @@ export class ProcessingHelper {
     throw new Error("App failed to initialize after 5 seconds")
   }
 
-  private async getCredits(): Promise<number> {
-    // Always return a high number of credits
-    return 999
-  }
-
   private async getLanguage(): Promise<string> {
     const mainWindow = this.deps.getMainWindow()
     if (!mainWindow) return "python"
@@ -279,8 +274,6 @@ export class ProcessingHelper {
   public async processScreenshots(): Promise<void> {
     const mainWindow = this.deps.getMainWindow()
     if (!mainWindow) return
-
-    // Credits check is bypassed - we always have enough credits
 
     const view = this.deps.getView()
     console.log("Processing screenshots in view:", view)
@@ -441,7 +434,18 @@ export class ProcessingHelper {
       const language = await this.getLanguage()
 
       const promptParts: Part[] = [
-        { text: `Extract the coding problem statement AND the relevant code snippet from these images. The problem might be stated as a question (e.g., "What will this code output?"). Ensure you include the actual code itself, not just the question. Programming Language: ${language}. Respond in ${RESPONSE_LANGUAGE}. Return the combined problem statement and code.` },
+        { text: `Analyze these screenshots and answer the user's question in one response. First identify the problem or question and any relevant code, then solve it.
+Respond entirely in ${RESPONSE_LANGUAGE}, using a concise, natural, human-sounding style.
+
+Return valid JSON with exactly these fields:
+- "problem_statement": The extracted question or problem, including relevant code if present. Do not claim code exists when there is none.
+- "short_answer": A brief direct answer, or null when not applicable.
+- "code": The corrected or proposed ${language} solution, or an empty string when code is not needed.
+- "thoughts": An array of concise, human-readable explanation strings. For non-code questions, use one or two natural sentences and do not expose private chain-of-thought.
+- "time_complexity": Complexity of the code solution, or "N/A" when no code is needed.
+- "space_complexity": Complexity of the code solution, or "N/A" when no code is needed.
+
+For conceptual, definition, comparison, yes/no, or other non-code questions, answer directly without inventing code. Do not include markdown fences around the JSON.` },
         ...imageDataList.map(image => ({
           inlineData: {
             data: image,
@@ -450,39 +454,87 @@ export class ProcessingHelper {
         }))
       ];
 
-      const problemInfo = await this.callAIWithFallback(
-        "Extract",
-        "You are an expert coding assistant.",
+      const rawContent = await this.callAIWithFallback(
+        "Analyze",
+        "You are a helpful coding interview assistant. Read the screenshots and produce the requested JSON answer in one request.",
         promptParts,
-        false,
+        true,
         signal
       );
 
-      // Store problem info in AppState
-      this.deps.setProblemInfo({ problem_statement: problemInfo })
+      let responseData: {
+        problem_statement: string
+        short_answer: string | null
+        code: string
+        thoughts: string[]
+        time_complexity: string
+        space_complexity: string
+      }
 
-      // Send first success event
+      try {
+        let jsonToParse = rawContent.trim()
+        if (jsonToParse.startsWith("```")) {
+          jsonToParse = jsonToParse
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/, "")
+            .trim()
+        }
+        const parsed = JSON.parse(jsonToParse)
+        if (
+          !parsed ||
+          typeof parsed !== "object" ||
+          typeof parsed.problem_statement !== "string" ||
+          !("code" in parsed) ||
+          !("thoughts" in parsed)
+        ) {
+          throw new Error("AI response did not contain the required fields")
+        }
+        responseData = {
+          problem_statement: parsed.problem_statement,
+          short_answer: parsed.short_answer || null,
+          code: parsed.code || "",
+          thoughts: Array.isArray(parsed.thoughts)
+            ? parsed.thoughts.map(String)
+            : [String(parsed.thoughts)],
+          time_complexity: parsed.time_complexity || "N/A",
+          space_complexity: parsed.space_complexity || "N/A"
+        }
+      } catch (parseError) {
+        console.error("Failed to parse combined screenshot response:", parseError)
+        return {
+          success: false,
+          error: "The AI returned an invalid response. Please try again."
+        }
+      }
+
+      conversationHistory.push({
+        role: "user",
+        content: `Problem: ${responseData.problem_statement}`,
+        timestamp: Date.now()
+      })
+      conversationHistory.push({
+        role: "assistant",
+        content: responseData.short_answer || responseData.thoughts.join(" "),
+        timestamp: Date.now()
+      })
+
+      this.deps.setProblemInfo({
+        problem_statement: responseData.problem_statement,
+        solution: responseData.code
+      })
+
       if (mainWindow) {
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.PROBLEM_EXTRACTED,
-          { problem_statement: problemInfo }
+          { problem_statement: responseData.problem_statement }
         )
 
-        // Generate solutions after successful extraction
-        const solutionsResult = await this.generateSolutionsHelper(signal)
-        if (solutionsResult.success) {
-          // Clear any existing extra screenshots before transitioning to solutions view
-          this.screenshotHelper.clearExtraScreenshotQueue()
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-            solutionsResult.data
-          )
-          return { success: true, data: solutionsResult.data }
-        } else {
-          throw new Error(
-            solutionsResult.error || "Failed to generate solutions"
-          )
-        }
+        this.screenshotHelper.clearExtraScreenshotQueue()
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
+          responseData
+        )
+        return { success: true, data: responseData }
       }
 
       return { success: false, error: "Main window not available" }
@@ -519,21 +571,22 @@ export class ProcessingHelper {
         ? `\n\nPrevious conversation context (for reference):\n${conversationContext}\n\n---\n`
         : ""
 
-      const systemPrompt = `You are an expert coding assistant. Analyze the provided problem and code snippet.
-Respond ENTIRELY in ${RESPONSE_LANGUAGE}. Be concise and focus on the essential information.
+      const systemPrompt = `You are a helpful, human-sounding coding interview assistant. Analyze the provided question and any code.
+Respond ENTIRELY in ${RESPONSE_LANGUAGE}. Be concise, natural, and focus on what a person would actually say.
 ${contextSection ? "Use the previous conversation context to provide continuity if the current question relates to earlier discussions." : ""}
 
 Instructions:
-1.  If possible, provide a very brief, direct answer to the problem first (e.g., the final output value or a direct yes/no).
-2.  Then, provide the detailed explanation, code, and complexity analysis.
-3.  Generate a response in JSON format containing the following fields:
+1.  If the question needs code, provide a brief direct answer first, then the solution, a clear explanation, and complexity analysis.
+2.  If the question does not need code (for example, a conceptual question, definition, comparison, yes/no question, or casual follow-up), answer it directly in plain, natural language. Keep "code" empty, set both complexity fields to "N/A", and use a short conversational explanation in "thoughts". Do not invent code just to fill the field.
+3.  Do not expose private chain-of-thought or lengthy hidden reasoning. Give only a concise explanation that helps the user understand the answer.
+4.  Generate a response in JSON format containing the following fields:
     - "short_answer": (Nullable string) A very brief, direct answer to the problem, if applicable (e.g., the program's output). Use null if not applicable. MUST be in ${RESPONSE_LANGUAGE}.
     - "code": (String) The corrected or proposed code solution in ${language}. Comments within the code MUST be in ${RESPONSE_LANGUAGE}.
-    - "thoughts": (Array of strings) Explanation of your thought process, step-by-step. MUST be in ${RESPONSE_LANGUAGE}.
+    - "thoughts": (Array of strings) A concise, human-readable explanation. For non-code questions, use one or two natural sentences rather than step-by-step reasoning. MUST be in ${RESPONSE_LANGUAGE}.
     - "time_complexity": (String) Time complexity analysis (e.g., "O(n)"). MUST be in ${RESPONSE_LANGUAGE}.
     - "space_complexity": (String) Space complexity analysis (e.g., "O(1)"). MUST be in ${RESPONSE_LANGUAGE}.
 
-If the problem statement is incomplete or unclear, set "short_answer" to null, explain the issue clearly in the "thoughts" field (in ${RESPONSE_LANGUAGE}), and set "code" to an empty string or a relevant placeholder comment (in ${RESPONSE_LANGUAGE}).`;
+If the question is incomplete or unclear, set "short_answer" to null, explain what is missing clearly and naturally in the "thoughts" field (in ${RESPONSE_LANGUAGE}), and set "code" to an empty string.`;
 
       const userPrompt = `${contextSection}Problem and Code:\n\`\`\`\n${problemInfo.problem_statement}\n\`\`\`\n\nGenerate the JSON response as described in the system prompt.`;
 
