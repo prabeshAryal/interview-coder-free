@@ -291,6 +291,34 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     }
   })
 
+  ipcMain.handle("get-language", () => {
+    try {
+      const language = store.get("PROGRAMMING_LANGUAGE")
+      return {
+        success: true,
+        language: typeof language === "string" && language.trim()
+          ? language
+          : "python"
+      }
+    } catch (error) {
+      console.error("Error getting language:", error)
+      return { success: false, language: "python", error: String(error) }
+    }
+  })
+
+  ipcMain.handle("set-language", (_event, language: string) => {
+    try {
+      if (typeof language !== "string" || !language.trim()) {
+        return { success: false, error: "Programming language is required." }
+      }
+      store.set("PROGRAMMING_LANGUAGE", language.trim())
+      return { success: true }
+    } catch (error) {
+      console.error("Error setting language:", error)
+      return { success: false, error: String(error) }
+    }
+  })
+
   ipcMain.handle("set-model", async (event, model: string) => {
     try {
       if (!isGeminiModel(model)) {

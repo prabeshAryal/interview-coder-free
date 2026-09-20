@@ -24,6 +24,9 @@
       "buildResources": "assets"
     },
     "asar": true,
+    "asarUnpack": [
+      "node_modules/screenshot-desktop/lib/win32/**/*"
+    ],
     "compression": "maximum",
     "generateUpdatesFilesForAllChannels": true,
     "mac": {

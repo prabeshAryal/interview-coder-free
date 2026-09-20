@@ -73,9 +73,18 @@ function App() {
 
   // Initialize app with default values
   useEffect(() => {
-    // Set default values
-    updateLanguage("python")
-    markInitialized()
+    const initializePreferences = async () => {
+      try {
+        const result = await window.electronAPI.getLanguage()
+        updateLanguage(result.success && result.language ? result.language : "python")
+      } catch (error) {
+        console.error("Failed to load language preference:", error)
+        updateLanguage("python")
+      } finally {
+        markInitialized()
+      }
+    }
+    initializePreferences()
   }, [updateLanguage, markInitialized])
 
   // Close toast after delay

@@ -6,6 +6,7 @@ import { app } from "electron"
 import { v4 as uuidv4 } from "uuid"
 import { execFile } from "child_process"
 import { promisify } from "util"
+import screenshotDesktop from "screenshot-desktop"
 
 const execFileAsync = promisify(execFile)
 
@@ -94,23 +95,10 @@ export class ScreenshotHelper {
   }
 
   private async captureScreenshotWindows(): Promise<Buffer> {
-    // Using PowerShell's native screenshot capability
-    const tmpPath = path.join(app.getPath("temp"), `${uuidv4()}.png`)
-    const script = `
-      Add-Type -AssemblyName System.Windows.Forms
-      Add-Type -AssemblyName System.Drawing
-      $screen = [System.Windows.Forms.Screen]::PrimaryScreen
-      $bitmap = New-Object System.Drawing.Bitmap $screen.Bounds.Width, $screen.Bounds.Height
-      $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-      $graphics.CopyFromScreen($screen.Bounds.X, $screen.Bounds.Y, 0, 0, $bitmap.Size)
-      $bitmap.Save('${tmpPath.replace(/'/g, "''")}')
-      $graphics.Dispose()
-      $bitmap.Dispose()
-    `
-    await execFileAsync("powershell", ["-NoProfile", "-NonInteractive", "-command", script], { windowsHide: true })
-    const buffer = await fs.promises.readFile(tmpPath)
-    await fs.promises.unlink(tmpPath)
-    return buffer
+    // Avoid starting PowerShell and loading .NET assemblies for every capture.
+    // JPEG is substantially smaller than PNG for full-screen captures and is
+    // sufficient for OCR/code screenshots at the model input resolution.
+    return Buffer.from(await screenshotDesktop({ format: "jpg" }))
   }
 
   public async takeScreenshot(
@@ -119,7 +107,8 @@ export class ScreenshotHelper {
   ): Promise<string> {
     console.log("Taking screenshot in view:", this.view)
     hideMainWindow()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    // Allow the compositor one frame to remove the overlay before capture.
+    await new Promise((resolve) => setTimeout(resolve, 16))
 
     let screenshotPath = ""
     try {
@@ -129,7 +118,8 @@ export class ScreenshotHelper {
           ? await this.captureScreenshotMac()
           : await this.captureScreenshotWindows()
 
-      screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.png`)
+      const extension = process.platform === "win32" ? "jpg" : "png"
+      screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.${extension}`)
       await fs.promises.writeFile(screenshotPath, screenshotBuffer)
       
       if (this.view === "queue") {
@@ -163,7 +153,6 @@ export class ScreenshotHelper {
       console.error("Screenshot error:", error)
       throw error
     } finally {
-      await new Promise((resolve) => setTimeout(resolve, 50))
       showMainWindow()
     }
 
@@ -173,7 +162,10 @@ export class ScreenshotHelper {
   public async getImagePreview(filepath: string): Promise<string> {
     try {
       const data = await fs.promises.readFile(filepath)
-      return `data:image/png;base64,${data.toString("base64")}`
+      const mimeType = path.extname(filepath).toLowerCase() === ".jpg"
+        ? "image/jpeg"
+        : "image/png"
+      return `data:${mimeType};base64,${data.toString("base64")}`
     } catch (error) {
       console.error("Error reading image:", error)
       throw error

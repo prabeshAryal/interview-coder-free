@@ -32,6 +32,8 @@ interface ElectronAPI {
   // Model management
   setModel: (model: string) => Promise<{ success: boolean; error?: string }>
   getModel: () => Promise<{ success: boolean; model?: string; error?: string }>
+  setLanguage: (language: string) => Promise<{ success: boolean; error?: string }>
+  getLanguage: () => Promise<{ success: boolean; language?: string; error?: string }>
   
   // Voice recording
   startVoiceRecording: () => Promise<{ success: boolean; error?: string }>

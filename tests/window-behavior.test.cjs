@@ -14,7 +14,8 @@ function harness() {
     setPosition(x, y) { this.bounds = { ...this.bounds, x, y } },
     hide() { this.visible = false },
     show() { this.visible = true; this.shows++ },
-    setIgnoreMouseEvents() {}, setAlwaysOnTop() {}, setVisibleOnAllWorkspaces() {}, setContentProtection() {}
+    showInactive() { this.visible = true; this.shows++ },
+    setIgnoreMouseEvents() {}, setFocusable() {}, setAlwaysOnTop() {}, setVisibleOnAllWorkspaces() {}, setContentProtection() {}
   }
   const source = fs.readFileSync('electron/main.ts', 'utf8') + '\nexports.testing = { state, takeScreenshot, toggleMainWindow, setWindowDimensions, moveWindowHorizontal, moveWindowVertical };'
   const context = {

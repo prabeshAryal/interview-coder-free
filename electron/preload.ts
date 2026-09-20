@@ -52,6 +52,8 @@ interface ElectronAPI {
   getApiKey: () => Promise<{ success: boolean; apiKey?: string; error?: string }>
   getModel: () => Promise<{ success: boolean; model?: string; error?: string }>
   setModel: (model: string) => Promise<{ success: boolean; error?: string }>
+  getLanguage: () => Promise<{ success: boolean; language?: string; error?: string }>
+  setLanguage: (language: string) => Promise<{ success: boolean; error?: string }>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
   quitApp: () => void
   
@@ -254,6 +256,8 @@ const electronAPI = {
   getApiKey: () => ipcRenderer.invoke("get-api-key"),
   getModel: () => ipcRenderer.invoke("get-model"),
   setModel: (model: string) => ipcRenderer.invoke("set-model", model),
+  getLanguage: () => ipcRenderer.invoke("get-language"),
+  setLanguage: (language: string) => ipcRenderer.invoke("set-language", language),
   setWindowFocusable: (focusable: boolean) => ipcRenderer.invoke("set-window-focusable", focusable),
   quitApp: () => ipcRenderer.invoke("quit-app"),
 

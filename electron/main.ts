@@ -1,5 +1,6 @@
 import { app, BrowserWindow, screen, shell, ipcMain } from "electron"
-import path from "path"
+import * as path from "path"
+import * as fs from "node:fs"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { ProcessingHelper } from "./ProcessingHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
@@ -9,6 +10,14 @@ import { initAutoUpdater } from "./autoUpdater"
 
 // Constants
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged
+
+// Keep Chromium's cache in the app's writable data directory. This avoids
+// stale or administrator-owned cache paths causing disk-cache startup errors.
+if (typeof app.getPath === "function" && typeof app.setPath === "function") {
+  const cachePath = path.join(app.getPath("userData"), "cache")
+  fs.mkdirSync(cachePath, { recursive: true })
+  app.setPath("cache", cachePath)
+}
 
 // Application State
 const state = {
@@ -166,7 +175,15 @@ async function takeScreenshot(): Promise<string> {
   // Preserve the user's visibility choice while the native capture is running.
   try {
     const screenshotPath = await state.screenshotHelper.takeScreenshot(
-      () => state.mainWindow?.hide(),
+      () => {
+        const win = state.mainWindow
+        if (!win || win.isDestroyed()) return
+        // Hide only for the duration of the capture. Do not change
+        // isWindowVisible, which represents the user's preference.
+        win.setIgnoreMouseEvents(true, { forward: true })
+        win.setFocusable(false)
+        win.hide()
+      },
       () => {}
     )
     state.view = "queue"
@@ -307,7 +324,10 @@ async function createWindow(): Promise<void> {
     fullscreenable: false,
     hasShadow: false,
     backgroundColor: "#00000000",
-    focusable: true,
+    // Keep the overlay from activating the app underneath it. This is
+    // important for browser fullscreen mode, where activation can reveal the
+    // taskbar and exit the browser's immersive presentation.
+    focusable: false,
     skipTaskbar: true,
     type: "panel",
     paintWhenInitiallyHidden: true,
@@ -421,9 +441,13 @@ function handleWindowClosed(): void {
 function setWindowFocusable(focusable: boolean): void {
   const win = state.mainWindow
   if (win && !win.isDestroyed()) {
-    // Visible controls must remain clickable even when settings are closed.
+    // A non-focusable window can still receive pointer events, so controls
+    // remain clickable without activating the Electron window.
     win.setIgnoreMouseEvents(false)
-    if (focusable && state.isWindowVisible && !state.captureInProgress) win.focus()
+    win.setFocusable(focusable)
+    if (focusable && state.isWindowVisible && !state.captureInProgress) {
+      win.focus()
+    }
   }
 }
 
@@ -435,6 +459,7 @@ function hideMainWindow(): void {
     state.windowPosition = { x: bounds.x, y: bounds.y }
     state.windowSize = { width: bounds.width, height: bounds.height }
     win.setIgnoreMouseEvents(true, { forward: true })
+    win.setFocusable(false)
     win.setAlwaysOnTop(true, "screen-saver", 1)
     win.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true
@@ -448,13 +473,14 @@ function showMainWindow(): void {
   const win = state.mainWindow
   if (win && !win.isDestroyed()) {
     win.setIgnoreMouseEvents(false)
+    win.setFocusable(false)
     win.setAlwaysOnTop(true, "screen-saver", 1)
     win.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true
     })
     win.setContentProtection(true)
     state.isWindowVisible = true
-    if (!state.captureInProgress) win.show()
+    if (!state.captureInProgress) win.showInactive()
   }
 }
 

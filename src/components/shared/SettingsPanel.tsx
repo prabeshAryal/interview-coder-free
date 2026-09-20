@@ -76,6 +76,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         try {
             setLanguage(languageId)
             window.__LANGUAGE__ = languageId
+            void window.electronAPI.setLanguage(languageId).then((result) => {
+                if (!result.success) {
+                    console.error("Failed to save language preference:", result.error)
+                }
+            })
             setIsLanguageOpen(false)
         } catch (error) {
             console.error("Error updating language preference:", error)

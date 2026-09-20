@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import path from "node:path"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { IProcessingHelperDeps } from "./main"
 import { app, BrowserWindow } from "electron"
@@ -118,6 +119,17 @@ export class ProcessingHelper {
     
     let lastError: any
     let successfulModel: string | null = null
+    const requestConfig = {
+      systemInstruction,
+      responseMimeType: jsonMode ? "application/json" : "text/plain",
+      abortSignal: signal,
+      httpOptions: {
+        timeout: RETRY_CONFIG.API_TIMEOUT_MS,
+        // The helper owns retries so transient failures do not incur the SDK's
+        // default five-attempt retry cycle before the UI can recover.
+        retryOptions: { attempts: 1 }
+      }
+    }
 
     for (const modelName of models) {
       if (signal?.aborted) {
@@ -129,10 +141,7 @@ export class ProcessingHelper {
 
         const response = await genAI.models.generateContent({
           model: modelName,
-          config: {
-            systemInstruction: systemInstruction,
-            responseMimeType: jsonMode ? "application/json" : "text/plain"
-          },
+          config: requestConfig,
           contents: [
             {
               role: "user",
@@ -178,10 +187,7 @@ export class ProcessingHelper {
           try {
             const retryResponse = await genAI.models.generateContent({
               model: modelName,
-              config: {
-                systemInstruction: systemInstruction,
-                responseMimeType: jsonMode ? "application/json" : "text/plain"
-              },
+              config: requestConfig,
               contents: [
                 {
                   role: "user",
@@ -295,8 +301,7 @@ export class ProcessingHelper {
         const screenshots = await Promise.all(
           screenshotQueue.map(async (path) => ({
             path,
-            preview: await this.screenshotHelper.getImagePreview(path),
-            data: fs.readFileSync(path).toString("base64")
+            data: (await fs.promises.readFile(path)).toString("base64")
           }))
         )
 
@@ -380,8 +385,7 @@ export class ProcessingHelper {
             ...extraScreenshotQueue
           ].map(async (path) => ({
             path,
-            preview: await this.screenshotHelper.getImagePreview(path),
-            data: fs.readFileSync(path).toString("base64")
+            data: (await fs.promises.readFile(path)).toString("base64")
           }))
         )
         console.log(
@@ -429,7 +433,12 @@ export class ProcessingHelper {
     signal: AbortSignal
   ): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
-      const imageDataList = screenshots.map((screenshot) => screenshot.data)
+      const imageDataList = screenshots.map((screenshot) => ({
+        data: screenshot.data,
+        mimeType: path.extname(screenshot.path).toLowerCase() === ".jpg"
+          ? "image/jpeg"
+          : "image/png"
+      }))
       const mainWindow = this.deps.getMainWindow()
       const language = await this.getLanguage()
 
@@ -448,8 +457,8 @@ Return valid JSON with exactly these fields:
 For conceptual, definition, comparison, yes/no, or other non-code questions, answer directly without inventing code. Do not include markdown fences around the JSON.` },
         ...imageDataList.map(image => ({
           inlineData: {
-            data: image,
-            mimeType: "image/jpeg"
+            data: image.data,
+            mimeType: image.mimeType
           }
         }))
       ];

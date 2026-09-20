@@ -17,6 +17,10 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
       // Just update the language locally
       setLanguage(newLanguage)
       window.__LANGUAGE__ = newLanguage
+      const result = await window.electronAPI.setLanguage(newLanguage)
+      if (!result.success) {
+        throw new Error(result.error || "Failed to save language preference")
+      }
     } catch (error) {
       console.error("Error updating language preference:", error)
     }

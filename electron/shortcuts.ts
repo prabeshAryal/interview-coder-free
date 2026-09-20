@@ -14,7 +14,9 @@ export class ShortcutsHelper {
     const register = (accelerator: string, callback: () => void | Promise<void>) => {
       const registered = globalShortcut.register(accelerator, callback)
       if (!registered) {
-        console.error(`Failed to register global shortcut: ${accelerator}`)
+        console.warn(
+          `Global shortcut unavailable: ${accelerator}. It may already be used by another application.`
+        )
       }
     }
 
