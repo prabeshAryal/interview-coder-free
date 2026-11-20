@@ -178,8 +178,7 @@ export class VoiceHelper {
           console.warn(`[Voice Transcription] Model ${modelName} failed:`, error.message)
 
           if (isUnavailableModelError(error)) {
-            console.log(`[Voice Transcription] Model ${modelName} is unavailable, trying next model...`)
-            continue
+            throw new Error(`Gemini model "${modelName}" is unavailable or not supported. No fallback was used.`)
           }
           
           if (isRateLimitError(error)) {

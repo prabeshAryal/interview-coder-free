@@ -24,6 +24,103 @@ let genAI: GoogleGenAI | null = null
 // Track the last successfully used model to emit to renderer
 let lastUsedModel: string = DEFAULT_MODEL
 
+async function generateGeminiContent(
+  apiKey: string,
+  modelName: string,
+  systemInstruction: string,
+  promptParts: Part[],
+  jsonMode: boolean,
+  signal?: AbortSignal
+): Promise<string> {
+  const requestController = new AbortController()
+  const timeoutId = setTimeout(
+    () => requestController.abort(),
+    RETRY_CONFIG.API_TIMEOUT_MS
+  )
+
+  const abortFromCaller = () => requestController.abort()
+  signal?.addEventListener("abort", abortFromCaller, { once: true })
+  if (signal?.aborted) {
+    requestController.abort()
+  }
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          generationConfig: {
+            responseMimeType: jsonMode ? "application/json" : "text/plain"
+          },
+          contents: [
+            {
+              role: "user",
+              parts: promptParts.map((part) => {
+                if ("text" in part) {
+                  return { text: part.text }
+                }
+                if ("inlineData" in part && part.inlineData) {
+                  return {
+                    inlineData: {
+                      mimeType: part.inlineData.mimeType,
+                      data: part.inlineData.data
+                    }
+                  }
+                }
+                return part
+              })
+            }
+          ]
+        }),
+        signal: requestController.signal
+      }
+    )
+
+    const rawBody = await response.text()
+    let errorBody: any = null
+    try {
+      errorBody = rawBody ? JSON.parse(rawBody) : null
+    } catch {}
+
+    if (!response.ok) {
+      const message =
+        errorBody?.error?.message ||
+        errorBody?.message ||
+        `Gemini API returned HTTP ${response.status}`
+      const error = new Error(message) as Error & { status?: number }
+      error.status = response.status
+      throw error
+    }
+
+    const result = errorBody
+    const text = result?.candidates?.[0]?.content?.parts
+      ?.map((part: { text?: string }) => part.text || "")
+      .filter(Boolean)
+      .join("")
+
+    return text || ""
+  } catch (error: any) {
+    if (signal?.aborted) {
+      throw new Error("CanceledError")
+    }
+    if (requestController.signal.aborted) {
+      throw new Error("Gemini API request timed out after 60 seconds.")
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+    signal?.removeEventListener("abort", abortFromCaller)
+  }
+}
+
 function detectMimeType(base64Data: string): string {
   if (base64Data.startsWith("iVBORw0KGgo")) return "image/png"
   if (base64Data.startsWith("/9j/")) return "image/jpeg"
@@ -139,14 +236,9 @@ export class ProcessingHelper {
     jsonMode: boolean = false,
     signal?: AbortSignal
   ): Promise<string> {
-    if (!genAI) {
-      // Try to initialize again in case key was set after startup
-      const apiKey = store.get("GEMINI_API_KEY") as string
-      if (apiKey) {
-        genAI = new GoogleGenAI({ apiKey })
-      } else {
-        throw new Error("Please set your API Key in Settings.")
-      }
+    const apiKey = store.get("GEMINI_API_KEY") as string
+    if (!apiKey) {
+      throw new Error("Please set your API Key in Settings.")
     }
 
     // Get user's preferred model from store, default to configured default
@@ -170,20 +262,14 @@ export class ProcessingHelper {
         const requestStartedAt = Date.now()
         console.log(`[Gemini Request - ${context}] Attempting with model: ${modelName}`)
 
-        const response = await genAI.models.generateContent({
-          model: modelName,
-          config: {
-            systemInstruction: systemInstruction,
-            responseMimeType: jsonMode ? "application/json" : "text/plain"
-          },
-          contents: [
-            {
-              role: "user",
-              parts: promptParts
-            }
-          ]
-        })
-        const responseText = response.text || ""
+        const responseText = await generateGeminiContent(
+          apiKey,
+          modelName,
+          systemInstruction,
+          promptParts,
+          jsonMode,
+          signal
+        )
 
         console.log(`[Gemini Response - ${context}] Success with ${modelName} in ${Date.now() - requestStartedAt}ms`)
         
@@ -203,8 +289,7 @@ export class ProcessingHelper {
         lastError = error
 
         if (isUnavailableModelError(error)) {
-          console.log(`[Gemini Fallback - ${context}] Model ${modelName} is unavailable, trying next model...`)
-          continue
+          throw new Error(`Gemini model "${modelName}" is unavailable or not supported. No fallback was used.`)
         }
 
         // Check if it's a rate limit error - try next model silently
@@ -477,18 +562,18 @@ export class ProcessingHelper {
         ? `\n\nPrevious conversation context (for reference):\n${conversationContext}\n\n---\n`
         : ""
 
-      const systemPrompt = `You are an expert coding interview assistant and competitive programming master.
-Analyze the provided screenshot(s) containing a coding problem, question, or code.
-Respond ENTIRELY in ${RESPONSE_LANGUAGE}. Be concise, highly accurate, and focus on optimal solutions.
+      const systemPrompt = `You are an expert technical interview assistant.
+Analyze the provided screenshot(s) containing a coding problem, conceptual question, interview question, or code.
+Respond ENTIRELY in ${RESPONSE_LANGUAGE}. Give the direct answer quickly and keep it concise.
 ${contextSection ? "Use the previous conversation context to provide continuity if the current question relates to earlier discussions." : ""}
 
 Instructions:
-1. Extract the complete problem statement and any provided starter code / snippets from the images into "problem_statement".
-2. If possible, provide a very brief, direct answer to the problem first in "short_answer" (e.g., final output value, return value, or direct answer). Set to null if not applicable.
-3. Provide the clean, optimal, production-ready code solution in ${language} in "code". Comments within code MUST be in ${RESPONSE_LANGUAGE}.
-4. Provide step-by-step reasoning in "thoughts" (array of strings in ${RESPONSE_LANGUAGE}).
-5. Provide time complexity analysis in "time_complexity" (e.g. "O(n)").
-6. Provide space complexity analysis in "space_complexity" (e.g. "O(1)").
+1. Read the question and give the most likely correct answer from the screenshot context. Do not say that information is missing unless the question is genuinely unreadable.
+2. For coding questions, give only a concise implementation in "code", using ${language}, and put the brief explanation or reasoning in "thoughts". For theoretical or conceptual questions, give a direct plain-text answer in "short_answer" or "thoughts"; do not invent code unless code is actually requested or clearly useful.
+3. Keep the final answer short and direct. Avoid commentary, caveats, filler, restated instructions, or generic explanations.
+4. Infer reasonable assumptions when a prompt is incomplete, and state only essential assumptions briefly.
+5. Extract the visible problem into "problem_statement".
+6. For coding questions, provide time complexity as "time_complexity" and space complexity as "space_complexity". Use "N/A" for theoretical answers.
 
 Output MUST be a valid JSON object matching this schema:
 {
@@ -500,11 +585,11 @@ Output MUST be a valid JSON object matching this schema:
   "space_complexity": string
 }
 
-If the problem statement is incomplete or unclear, extract whatever is visible into "problem_statement", set "short_answer" to null, explain the issue clearly in the "thoughts" field (in ${RESPONSE_LANGUAGE}), and set "code" to an empty string or a relevant placeholder comment.`
+If the problem is theoretical or non-coding, return the full answer in "short_answer", add only essential supporting detail to "thoughts" if needed, and set "code" to an empty string. Do not return placeholders or fabricated code.`
 
       const promptParts: Part[] = [
         {
-          text: `${contextSection}Extract the coding problem statement and any code snippets from the attached screenshot(s), solve it in ${language}, and return the full JSON response.`
+          text: `${contextSection}Answer the question shown in the attached screenshot(s) as directly as possible. Use ${language} only for code that is needed. Return the concise JSON response.`
         },
         ...imageDataList.map((image) => ({
           inlineData: {
@@ -544,7 +629,7 @@ If the problem statement is incomplete or unclear, extract whatever is visible i
           const code =
             typeof parsed.code === "string" && parsed.code.trim()
               ? parsed.code
-              : (shortAnswer ? `// Short Answer: ${shortAnswer}` : "// Solution generated successfully.")
+              : ""
           const thoughts =
             Array.isArray(parsed.thoughts) && parsed.thoughts.length > 0
               ? parsed.thoughts.map(String)
@@ -561,12 +646,12 @@ If the problem statement is incomplete or unclear, extract whatever is visible i
             space_complexity: spaceComplexity
           }
         } else {
-          // If JSON extraction failed, use rawContent as code
+          // If JSON extraction failed, preserve the text as a direct answer
           structuredData = {
             problem_statement: "Problem statement extracted from screenshots.",
-            short_answer: null,
-            code: rawContent || "// No code generated",
-            thoughts: [`AI response received in text format.`, rawContent],
+            short_answer: rawContent || null,
+            code: "",
+            thoughts: [],
             time_complexity: "N/A",
             space_complexity: "N/A"
           }
@@ -575,9 +660,9 @@ If the problem statement is incomplete or unclear, extract whatever is visible i
         console.warn(`Failed to parse AI response as JSON (language: ${RESPONSE_LANGUAGE}). Raw content:`, rawContent)
         structuredData = {
           problem_statement: "Could not cleanly parse problem statement from AI response.",
-          short_answer: null,
-          code: rawContent || "// Raw AI Response",
-          thoughts: [`The AI response could not be parsed as valid JSON.`, "Raw AI Response:", rawContent],
+          short_answer: rawContent || null,
+          code: "",
+          thoughts: [],
           time_complexity: "N/A",
           space_complexity: "N/A"
         }

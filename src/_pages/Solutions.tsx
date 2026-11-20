@@ -412,7 +412,7 @@ const Solutions: React.FC<SolutionsProps> = ({
         // Expect data to potentially have short_answer
         const solutionPayload = {
           short_answer: data.short_answer, // Include short_answer
-          code: data.code || "// Solution generated successfully",
+          code: typeof data.code === "string" && data.code.trim() ? data.code : null,
           thoughts: Array.isArray(data.thoughts) ? data.thoughts : [String(data.thoughts || "")],
           time_complexity: data.time_complexity || "N/A",
           space_complexity: data.space_complexity || "N/A"
@@ -571,7 +571,7 @@ const Solutions: React.FC<SolutionsProps> = ({
           <div className="mb-4 interactive-area">
             <SolutionCommands
               onTooltipVisibilityChange={handleTooltipVisibilityChange}
-              isProcessing={!problemStatementData || !solutionData}
+              isProcessing={!problemStatementData || (!shortAnswerData && !solutionData && (!thoughtsData || thoughtsData.length === 0))}
               extraScreenshots={extraScreenshots}
               credits={credits}
               currentLanguage={currentLanguage}
@@ -593,7 +593,7 @@ const Solutions: React.FC<SolutionsProps> = ({
                 </div>
               )}
 
-              {!solutionData && (
+              {!shortAnswerData && (!thoughtsData || thoughtsData.length === 0) && !solutionData && (
                 <>
                   <ContentSection
                     title="Problem Statement"
@@ -609,49 +609,56 @@ const Solutions: React.FC<SolutionsProps> = ({
                 </>
               )}
 
-              {solutionData && (
+              {(solutionData || shortAnswerData || (thoughtsData && thoughtsData.length > 0)) && (
                 <>
-                  {shortAnswerData && shortAnswerData.trim() !== "" && (
+                  {!solutionData && (
                     <ContentSection
-                      title="Short Answer"
-                      content={shortAnswerData}
+                      title="Answer"
+                      content={
+                        <div className="space-y-2">
+                          {shortAnswerData && (
+                            <MarkdownContent content={shortAnswerData} />
+                          )}
+                          {thoughtsData?.map((thought, index) => (
+                            <MarkdownContent key={index} content={thought} />
+                          ))}
+                        </div>
+                      }
                       isLoading={false}
                     />
                   )}
-                  <ContentSection
-                    title={`Explanation (${COMMAND_KEY}+↑↓ to move)`}
-                    content={
-                      thoughtsData && (
-                        <div className="space-y-1.5">
-                          {thoughtsData.map((thought, index) => (
-                            <div
-                              key={index}
-                              className="flex items-start gap-2 p-2 rounded-lg hover:bg-white/[0.02] transition-colors"
-                            >
-                              <span className="text-[10px] font-medium text-indigo-400 mt-0.5 shrink-0">{index + 1}.</span>
-                              <div className="text-white/80 text-sm flex-1">
-                                <MarkdownContent content={thought} />
-                              </div>
+
+                  {solutionData && (
+                    <>
+                      {shortAnswerData && shortAnswerData.trim() !== "" && (
+                        <ContentSection
+                          title="Answer"
+                          content={
+                            <div className="space-y-2">
+                              <MarkdownContent content={shortAnswerData} />
+                              {thoughtsData?.map((thought, index) => (
+                                <MarkdownContent key={index} content={thought} />
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      )
-                    }
-                    isLoading={!thoughtsData}
-                  />
+                          }
+                          isLoading={false}
+                        />
+                      )}
 
-                  <SolutionSection
-                    title="Solution"
-                    content={solutionData}
-                    isLoading={!solutionData}
-                    currentLanguage={currentLanguage}
-                  />
+                      <SolutionSection
+                        title="Code"
+                        content={solutionData}
+                        isLoading={false}
+                        currentLanguage={currentLanguage}
+                      />
 
-                  <ComplexitySection
-                    timeComplexity={timeComplexityData}
-                    spaceComplexity={spaceComplexityData}
-                    isLoading={!timeComplexityData || !spaceComplexityData}
-                  />
+                      <ComplexitySection
+                        timeComplexity={timeComplexityData}
+                        spaceComplexity={spaceComplexityData}
+                        isLoading={!timeComplexityData || !spaceComplexityData}
+                      />
+                    </>
+                  )}
                 </>
               )}
 
