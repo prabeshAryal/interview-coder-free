@@ -18,7 +18,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
     const [isLanguageOpen, setIsLanguageOpen] = useState(false)
     const [isModelOpen, setIsModelOpen] = useState(false)
-    const [currentModel, setCurrentModel] = useState("gemini-2.5-flash")
+    const [currentModel, setCurrentModel] = useState("gemini-4-hydrogen")
+
+    // Only allow keyboard focus when actually typing in the API key input
+    useEffect(() => {
+        if (isEditing) {
+            window.electronAPI.setWindowFocusable(true)
+        } else {
+            window.electronAPI.setWindowFocusable(false)
+        }
+        return () => {
+            window.electronAPI.setWindowFocusable(false)
+        }
+    }, [isEditing])
 
     const dropdownRef = useRef<HTMLDivElement>(null)
     const modelDropdownRef = useRef<HTMLDivElement>(null)
@@ -37,11 +49,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     ]
 
     const models = [
-        { id: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview" },
-        // { id: "gemini-3-pro", label: "Gemini 3 Pro" },
-        { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-        { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-        { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" }
+        { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen" },
+        { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
+        { id: "gemini-4-argon", label: "Gemini 4 Argon" },
+        { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+        { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+        { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash-Lite" },
+        { id: "gemini-3-flash-preview", label: "Gemini 3 Flash" }
     ]
 
     useEffect(() => {
@@ -53,10 +67,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     setApiKey(keyResult.apiKey)
                 }
 
-                // Load model preference
+                // Load model preference - fallback to default if stored model is outdated
                 const modelResult = await window.electronAPI.getModel()
-                if (modelResult.success && modelResult.model) {
+                if (modelResult.success && modelResult.model && models.some(m => m.id === modelResult.model)) {
                     setCurrentModel(modelResult.model)
+                } else {
+                    setCurrentModel("gemini-4-hydrogen")
+                    await window.electronAPI.setModel("gemini-4-hydrogen")
                 }
             } catch (error) {
                 console.error("Failed to load settings:", error)

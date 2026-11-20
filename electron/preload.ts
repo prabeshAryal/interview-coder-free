@@ -53,6 +53,7 @@ interface ElectronAPI {
   getModel: () => Promise<{ success: boolean; model?: string; error?: string }>
   setModel: (model: string) => Promise<{ success: boolean; error?: string }>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => Promise<void>
   quitApp: () => void
   
   // Voice recording
@@ -250,6 +251,8 @@ const electronAPI = {
   getModel: () => ipcRenderer.invoke("get-model"),
   setModel: (model: string) => ipcRenderer.invoke("set-model", model),
   setWindowFocusable: (focusable: boolean) => ipcRenderer.invoke("set-window-focusable", focusable),
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) =>
+    ipcRenderer.invoke("set-ignore-mouse-events", ignore, options),
   quitApp: () => ipcRenderer.invoke("quit-app"),
 
   // Voice recording methods
@@ -299,11 +302,6 @@ console.log(
   "About to expose electronAPI with methods:",
   Object.keys(electronAPI)
 )
-
-// Add this focus restoration handler
-window.addEventListener("focus", () => {
-  console.log("Window focused")
-})
 
 // Expose the API to the renderer process
 contextBridge.exposeInMainWorld("electronAPI", electronAPI)

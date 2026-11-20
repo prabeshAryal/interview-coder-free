@@ -310,6 +310,16 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     }
   })
 
+  ipcMain.handle(
+    "set-ignore-mouse-events",
+    (_event, ignore: boolean, options?: { forward?: boolean }) => {
+      const mainWindow = deps.getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setIgnoreMouseEvents(ignore, options)
+      }
+    }
+  )
+
   ipcMain.handle("quit-app", () => {
     app.quit()
   })

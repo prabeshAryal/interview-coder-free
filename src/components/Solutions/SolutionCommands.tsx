@@ -51,10 +51,6 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
     }
   })
 
-  // Control window focusability based on panel state
-  useEffect(() => {
-    window.electronAPI.setWindowFocusable(isPanelOpen)
-  }, [isPanelOpen])
 
   // Update panel position when pill is clicked - position ABOVE the pill
   useEffect(() => {

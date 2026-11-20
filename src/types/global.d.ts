@@ -6,6 +6,7 @@ interface ElectronAPI {
   setWindowDimensions: (width: number, height: number) => Promise<void>
   toggleMainWindow: () => Promise<{ success: boolean; error?: string }>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => Promise<void>
   
   // Screenshot operations
   getScreenshots: () => Promise<{

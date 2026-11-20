@@ -174,13 +174,13 @@ async function takeScreenshot(): Promise<string> {
 
     // Keep the native window in place: hide/show can activate another app
     // (or the taskbar). Only make our overlay transparent during capture.
-    const opacity = state.isWindowVisible ? win.getOpacity() : 1
+    const targetOpacity = 1
     if (state.isWindowVisible) win.setOpacity(0)
     screenshotCaptureWindow = win
     return () => {
       screenshotCaptureWindow = null
       // Do not undo a manual hide or restore a window that has been closed.
-      if (!win.isDestroyed() && state.isWindowVisible) win.setOpacity(opacity)
+      if (!win.isDestroyed() && state.isWindowVisible) win.setOpacity(targetOpacity)
     }
   }) || ""
   
@@ -285,7 +285,6 @@ function initializeHelpers() {
 async function createWindow(): Promise<void> {
   if (state.mainWindow) {
     if (state.mainWindow.isMinimized()) state.mainWindow.restore()
-    state.mainWindow.focus()
     return
   }
 
@@ -295,8 +294,8 @@ async function createWindow(): Promise<void> {
   state.screenHeight = workArea.height
   state.step = 60
   
-  const initialWidth = 760
-  const initialHeight = 600
+  const initialWidth = 520
+  const initialHeight = 400
   const horizontalInset = 40
   const verticalInset = 24
   const leftAnchor = Math.max(workArea.x + horizontalInset, workArea.x)
@@ -323,13 +322,13 @@ async function createWindow(): Promise<void> {
         : path.join(__dirname, "preload.js"),
       scrollBounce: true
     },
-    show: true,
+    show: false,
     frame: false,
     transparent: true,
     fullscreenable: false,
     hasShadow: false,
     backgroundColor: "#00000000",
-    focusable: true,
+    focusable: false,
     skipTaskbar: true,
     type: "panel",
     paintWhenInitiallyHidden: true,
@@ -403,13 +402,6 @@ async function createWindow(): Promise<void> {
   // Prevent the window from being captured by screen recording
   state.mainWindow.webContents.setBackgroundThrottling(false)
   state.mainWindow.webContents.setFrameRate(60)
-  
-  // Re-apply content protection after any changes
-  setInterval(() => {
-    if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-      state.mainWindow.setContentProtection(true)
-    }
-  }, 5000)
 
   // Set up window listeners
   state.mainWindow.on("move", handleWindowMove)
@@ -423,6 +415,9 @@ async function createWindow(): Promise<void> {
   state.currentX = bounds.x
   state.currentY = bounds.y
   state.isWindowVisible = true
+
+  // Show inactive so no focus is stolen from the active application
+  state.mainWindow.showInactive()
 }
 
 function handleWindowMove(): void {
@@ -450,18 +445,10 @@ function handleWindowClosed(): void {
 function setWindowFocusable(focusable: boolean): void {
   const win = state.mainWindow
   if (win && !win.isDestroyed()) {
-    // Always keep mouse events enabled for the pill area
-    // Only control focusability for keyboard input
+    win.setFocusable(focusable)
     if (focusable) {
-      win.setIgnoreMouseEvents(false)
-    } else {
-      // Use forward: true to allow click-through except on interactive elements
-      win.setIgnoreMouseEvents(true, { forward: true })
+      win.focus()
     }
-    
-    // Maintain always on top
-    win.setAlwaysOnTop(true, 'screen-saver', 1)
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
 }
 
@@ -472,14 +459,10 @@ function hideMainWindow(): void {
     const bounds = win.getBounds()
     state.windowPosition = { x: bounds.x, y: bounds.y }
     state.windowSize = { width: bounds.width, height: bounds.height }
-    win.setIgnoreMouseEvents(true, { forward: true })
-    win.setAlwaysOnTop(true, "screen-saver", 1)
-    win.setVisibleOnAllWorkspaces(true, {
-      visibleOnFullScreen: true
-    })
     win.setOpacity(0)
-    win.hide()
+    win.setIgnoreMouseEvents(true, { forward: true })
     state.isWindowVisible = false
+    win.webContents.send("window-visibility-changed", false)
   }
 }
 
@@ -493,15 +476,9 @@ function showMainWindow(): void {
       })
     }
     win.setIgnoreMouseEvents(false)
-    win.setAlwaysOnTop(true, "screen-saver", 1)
-    win.setVisibleOnAllWorkspaces(true, {
-      visibleOnFullScreen: true
-    })
-    win.setContentProtection(true)
-    win.setOpacity(0)
-    win.showInactive()
     if (screenshotCaptureWindow !== win) win.setOpacity(1)
     state.isWindowVisible = true
+    win.webContents.send("window-visibility-changed", true)
   }
 }
 
@@ -583,9 +560,9 @@ function setWindowDimensions(width: number, height: number): void {
     const primaryDisplay = screen.getPrimaryDisplay()
     const workArea = primaryDisplay.workArea
 
-    // Pill mode: wider to accommodate voice controls
+    // Pill mode: wider to accommodate voice controls and tall enough for settings panel
     const PILL_WIDTH = 520
-    const PILL_HEIGHT = 380 // Increased height for settings panel
+    const PILL_HEIGHT = 400 // Fixed height so settings panel and dropdowns are never cut off
 
     // Solution mode: use most of the screen width
     const SOLUTION_MIN_WIDTH = 650
@@ -621,6 +598,15 @@ function setWindowDimensions(width: number, height: number): void {
     state.currentY = bottomY
 
     if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+      const currentBounds = state.mainWindow.getBounds()
+      if (
+        currentBounds.x === centerX &&
+        currentBounds.y === bottomY &&
+        currentBounds.width === finalWidth &&
+        currentBounds.height === finalHeight
+      ) {
+        return
+      }
       state.mainWindow.setBounds({
         x: centerX,
         y: bottomY,

@@ -86,6 +86,48 @@ export class ScreenshotHelper {
     this.extraScreenshotQueue = []
   }
 
+  private captureQueue: Array<{
+    prepareWindowForCapture: () => () => void
+    resolve: (path: string) => void
+    reject: (error: any) => void
+  }> = []
+
+  private getScreenCapExePath(): string {
+    const candidates = [
+      path.join(__dirname, "screencap.exe"),
+      path.join(__dirname, "../electron/screencap.exe"),
+      path.join(app.getAppPath(), "electron/screencap.exe"),
+      path.join(app.getPath("userData"), "screencap.exe")
+    ]
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate
+      }
+    }
+    // If not found, try to compile screencap.cs if available
+    const csCandidates = [
+      path.join(__dirname, "screencap.cs"),
+      path.join(__dirname, "../electron/screencap.cs"),
+      path.join(app.getAppPath(), "electron/screencap.cs")
+    ]
+    const targetExe = path.join(app.getPath("userData"), "screencap.exe")
+    const cscPath = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe"
+    for (const cs of csCandidates) {
+      if (fs.existsSync(cs) && fs.existsSync(cscPath)) {
+        try {
+          const { execFileSync } = require("child_process")
+          execFileSync(cscPath, ["/target:winexe", "/optimize+", `/out:${targetExe}`, cs], { windowsHide: true })
+          if (fs.existsSync(targetExe)) {
+            return targetExe
+          }
+        } catch (e) {
+          console.error("Failed to compile screencap.cs:", e)
+        }
+      }
+    }
+    return ""
+  }
+
   private async captureScreenshotMac(): Promise<Buffer> {
     const tmpPath = path.join(app.getPath("temp"), `${uuidv4()}.png`)
     await execFileAsync("screencapture", ["-x", tmpPath])
@@ -95,8 +137,24 @@ export class ScreenshotHelper {
   }
 
   private async captureScreenshotWindows(): Promise<Buffer> {
-    // Capture without creating a console window or activating the taskbar.
     const tmpPath = path.join(app.getPath("temp"), `${uuidv4()}.png`)
+    const exePath = this.getScreenCapExePath()
+    
+    // Fast, stealthy, native GUI binary capture (no console, no conhost, no taskbar popups)
+    if (exePath) {
+      try {
+        await execFileAsync(exePath, [tmpPath], { windowsHide: true })
+        if (fs.existsSync(tmpPath)) {
+          const buffer = await fs.promises.readFile(tmpPath)
+          await fs.promises.unlink(tmpPath)
+          return buffer
+        }
+      } catch (err) {
+        console.warn("Native screencap.exe failed, falling back to PowerShell:", err)
+      }
+    }
+
+    // Fallback using PowerShell with windowsHide
     const script = `
       Add-Type -AssemblyName System.Windows.Forms
       Add-Type -AssemblyName System.Drawing
@@ -126,15 +184,24 @@ export class ScreenshotHelper {
   public async takeScreenshot(
     prepareWindowForCapture: () => () => void
   ): Promise<string> {
-    // Repeated shortcuts must not restore the overlay during another capture.
-    if (this.captureInProgress) throw new Error("Screenshot already in progress")
+    return new Promise<string>((resolve, reject) => {
+      this.captureQueue.push({ prepareWindowForCapture, resolve, reject })
+      this.processCaptureQueue()
+    })
+  }
+
+  private async processCaptureQueue(): Promise<void> {
+    if (this.captureInProgress || this.captureQueue.length === 0) return
     this.captureInProgress = true
+    const item = this.captureQueue.shift()!
+
     let restoreWindow = () => {}
     let screenshotPath = ""
     try {
       console.log("Taking screenshot in view:", this.view)
-      restoreWindow = prepareWindowForCapture()
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      restoreWindow = item.prepareWindowForCapture()
+      // Brief 20ms pause for window opacity 0 to register
+      await new Promise((resolve) => setTimeout(resolve, 20))
 
       // Get screenshot buffer using native methods
       const screenshotBuffer =
@@ -159,7 +226,6 @@ export class ScreenshotHelper {
         console.log(`Added screenshot to queue (${this.screenshotQueue.length}/${this.MAX_SCREENSHOTS}):`, screenshotPath)
       } else {
         // In solutions/debug view: this is a NEW question, clear old screenshots
-        // User wants to ask about something new, not combine with previous
         this.screenshotQueue.forEach((oldPath) => {
           fs.unlink(oldPath, (err) => {
             if (err) console.error(`Error deleting old screenshot at ${oldPath}:`, err)
@@ -167,23 +233,23 @@ export class ScreenshotHelper {
         })
         this.screenshotQueue = [screenshotPath]
         console.log(`New question - replaced queue with fresh screenshot (1/${this.MAX_SCREENSHOTS}):`, screenshotPath)
-        
-        // Switch back to queue view
-        console.log("Switching from", this.view, "to queue view for new question")
         this.view = "queue"
       }
+      item.resolve(screenshotPath)
     } catch (error) {
       console.error("Screenshot error:", error)
-      throw error
+      item.reject(error)
     } finally {
       try {
         restoreWindow()
       } finally {
         this.captureInProgress = false
+        // Process next queued screenshot if user triggered rapidly
+        if (this.captureQueue.length > 0) {
+          setTimeout(() => this.processCaptureQueue(), 30)
+        }
       }
     }
-
-    return screenshotPath
   }
 
   public async getImagePreview(filepath: string): Promise<string> {

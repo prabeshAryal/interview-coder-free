@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Disable text selection across the stealth overlay by default */
+*, *::before, *::after {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Smooth Scrolling */
 html {
   scroll-behavior: smooth;

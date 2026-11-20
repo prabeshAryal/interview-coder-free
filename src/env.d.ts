@@ -65,6 +65,7 @@ interface ElectronAPI {
   getModel: () => Promise<{ success: boolean; model?: string; error?: string }>
   setModel: (model: string) => Promise<{ success: boolean; error?: string }>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => Promise<void>
   quitApp: () => void
   getPlatform: () => string
   onOutOfCredits: (callback: () => void) => () => void

@@ -5,6 +5,7 @@ import { app, BrowserWindow } from "electron"
 import { GoogleGenAI, Part } from "@google/genai"
 import Store from "electron-store"
 import {
+  GEMINI_MODELS,
   DEFAULT_MODEL,
   getFallbackChain,
   isRateLimitError,
@@ -111,7 +112,12 @@ export class ProcessingHelper {
     }
 
     // Get user's preferred model from store, default to configured default
-    const userModel = (store.get("GEMINI_MODEL") as string as GeminiModel) || DEFAULT_MODEL
+    const storedModel = store.get("GEMINI_MODEL") as string
+    const validModels = Object.values(GEMINI_MODELS) as string[]
+    const userModel = (validModels.includes(storedModel) ? storedModel : DEFAULT_MODEL) as GeminiModel
+    if (storedModel && !validModels.includes(storedModel)) {
+      store.set("GEMINI_MODEL", DEFAULT_MODEL)
+    }
     
     // Get the fallback chain starting from user's preferred model
     const models = getFallbackChain(userModel)
@@ -286,6 +292,7 @@ export class ProcessingHelper {
     console.log("Processing screenshots in view:", view)
 
     if (view === "queue") {
+      this.deps.setView("solutions")
       mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
       const screenshotQueue = this.screenshotHelper.getScreenshotQueue()
       console.log("Processing main queue screenshots:", screenshotQueue)

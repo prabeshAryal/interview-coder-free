@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai"
 import { BrowserWindow } from "electron"
 import Store from "electron-store"
 import {
+  GEMINI_MODELS,
   DEFAULT_MODEL,
   getFallbackChain,
   isRateLimitError,
@@ -132,7 +133,12 @@ export class VoiceHelper {
       }
 
       // Get the selected model from store, default to configured default
-      const userModel = (store.get("GEMINI_MODEL") as string as GeminiModel) || DEFAULT_MODEL
+      const storedModel = store.get("GEMINI_MODEL") as string
+      const validModels = Object.values(GEMINI_MODELS) as string[]
+      const userModel = (validModels.includes(storedModel) ? storedModel : DEFAULT_MODEL) as GeminiModel
+      if (storedModel && !validModels.includes(storedModel)) {
+        store.set("GEMINI_MODEL", DEFAULT_MODEL)
+      }
       const models = getFallbackChain(userModel)
       
       console.log("Using model for voice:", userModel, "with fallback chain:", models)

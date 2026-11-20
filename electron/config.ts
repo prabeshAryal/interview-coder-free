@@ -6,10 +6,13 @@
  * Order: Latest/most capable → most stable
  */
 export const GEMINI_MODELS = {
-  GEMINI_3_PRO_PREVIEW: "gemini-3-pro-preview",
-  GEMINI_2_5_PRO: "gemini-2.5-pro",
-  GEMINI_2_5_FLASH: "gemini-2.5-flash",
-  GEMINI_2_0_FLASH: "gemini-2.0-flash"
+  GEMINI_4_HYDROGEN: "gemini-4-hydrogen",
+  GEMINI_3_5_FLASH_LITE: "gemini-3.5-flash-lite",
+  GEMINI_4_ARGON: "gemini-4-argon",
+  GEMINI_3_8_FLASH: "gemini-3.8-flash",
+  GEMINI_3_6_FLASH: "gemini-3.6-flash",
+  GEMINI_3_1_FLASH_LITE: "gemini-3.1-flash-lite",
+  GEMINI_3_FLASH_PREVIEW: "gemini-3-flash-preview"
 } as const
 
 export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
@@ -17,31 +20,31 @@ export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
 /**
  * Default model to use when no preference is set
  */
-export const DEFAULT_MODEL: GeminiModel = GEMINI_MODELS.GEMINI_2_5_FLASH
+export const DEFAULT_MODEL: GeminiModel = GEMINI_MODELS.GEMINI_4_HYDROGEN
 
 /**
- * Fallback chain - ordered from highest priority to lowest
- * When a model fails (rate limit, error), we try the next one
+ * Fallback chain - ordered from fastest/highest priority to lowest
+ * When a model fails (503 busy, 429 rate limit, network), we try the next one
  */
 export const MODEL_FALLBACK_ORDER: GeminiModel[] = [
-  GEMINI_MODELS.GEMINI_3_PRO_PREVIEW,
-  GEMINI_MODELS.GEMINI_2_5_PRO,
-  GEMINI_MODELS.GEMINI_2_5_FLASH,
-  GEMINI_MODELS.GEMINI_2_0_FLASH
+  GEMINI_MODELS.GEMINI_4_HYDROGEN,
+  GEMINI_MODELS.GEMINI_3_5_FLASH_LITE,
+  GEMINI_MODELS.GEMINI_4_ARGON,
+  GEMINI_MODELS.GEMINI_3_8_FLASH,
+  GEMINI_MODELS.GEMINI_3_6_FLASH,
+  GEMINI_MODELS.GEMINI_3_1_FLASH_LITE,
+  GEMINI_MODELS.GEMINI_3_FLASH_PREVIEW
 ]
 
 /**
  * Get the fallback chain starting from a specific model
- * This ensures we try models in order, skipping any that come before the current one
+ * Tries the selected model first, then remaining models in priority order
  */
 export function getFallbackChain(startModel: GeminiModel): GeminiModel[] {
-  const startIndex = MODEL_FALLBACK_ORDER.indexOf(startModel)
-  if (startIndex === -1) {
-    // Unknown model, start from beginning
+  if (!MODEL_FALLBACK_ORDER.includes(startModel)) {
     return MODEL_FALLBACK_ORDER
   }
-  // Return models from current position onwards
-  return MODEL_FALLBACK_ORDER.slice(startIndex)
+  return [startModel, ...MODEL_FALLBACK_ORDER.filter((m) => m !== startModel)]
 }
 
 /**
@@ -68,7 +71,12 @@ export function isRateLimitError(error: any): boolean {
     errorStr.includes("429") ||
     errorStr.includes("rate limit") ||
     errorStr.includes("quota") ||
-    errorStr.includes("RESOURCE_EXHAUSTED")
+    errorStr.includes("RESOURCE_EXHAUSTED") ||
+    errorStr.includes("503") ||
+    errorStr.includes("UNAVAILABLE") ||
+    errorStr.includes("high demand") ||
+    errorStr.includes("temporarily unavailable") ||
+    errorStr.includes("overloaded")
   )
 }
 
@@ -105,10 +113,13 @@ export function getErrorMessage(error: any): string {
  * Model display names for UI
  */
 export const MODEL_DISPLAY_NAMES: Record<GeminiModel, string> = {
-  [GEMINI_MODELS.GEMINI_3_PRO_PREVIEW]: "Gemini 3 Pro Preview",
-  [GEMINI_MODELS.GEMINI_2_5_PRO]: "Gemini 2.5 Pro",
-  [GEMINI_MODELS.GEMINI_2_5_FLASH]: "Gemini 2.5 Flash",
-  [GEMINI_MODELS.GEMINI_2_0_FLASH]: "Gemini 2.0 Flash"
+  [GEMINI_MODELS.GEMINI_4_HYDROGEN]: "Gemini 4 Hydrogen",
+  [GEMINI_MODELS.GEMINI_3_5_FLASH_LITE]: "Gemini 3.5 Flash-Lite",
+  [GEMINI_MODELS.GEMINI_4_ARGON]: "Gemini 4 Argon",
+  [GEMINI_MODELS.GEMINI_3_8_FLASH]: "Gemini 3.8 Flash",
+  [GEMINI_MODELS.GEMINI_3_6_FLASH]: "Gemini 3.6 Flash",
+  [GEMINI_MODELS.GEMINI_3_1_FLASH_LITE]: "Gemini 3.1 Flash-Lite",
+  [GEMINI_MODELS.GEMINI_3_FLASH_PREVIEW]: "Gemini 3 Flash"
 }
 
 /**

@@ -82,21 +82,11 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
     const resizeObserver = new ResizeObserver(updateDimensions)
     resizeObserver.observe(containerRef.current)
 
-    // Also watch DOM changes
-    const mutationObserver = new MutationObserver(updateDimensions)
-    mutationObserver.observe(containerRef.current, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      characterData: true
-    })
-
     // Initial dimension update
     updateDimensions()
 
     return () => {
       resizeObserver.disconnect()
-      mutationObserver.disconnect()
     }
   }, [view])
 

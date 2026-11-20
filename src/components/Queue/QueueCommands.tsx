@@ -44,10 +44,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     }
   })
 
-  // Control window focusability based on panel state
-  useEffect(() => {
-    window.electronAPI.setWindowFocusable(isPanelOpen)
-  }, [isPanelOpen])
 
   useEffect(() => {
     if (onPanelToggle) {
