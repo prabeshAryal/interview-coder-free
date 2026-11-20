@@ -122,6 +122,9 @@ export interface IIpcHandlerDeps {
   resetWindowPosition: () => void
 }
 
+// Keep the overlay transparent even if it is shown while capture is underway.
+let screenshotCaptureWindow: BrowserWindow | null = null
+
 // State getter/setter functions
 function getMainWindow(): BrowserWindow | null {
   return state.mainWindow
@@ -165,10 +168,21 @@ function clearQueues(): void {
 async function takeScreenshot(): Promise<string> {
   if (!state.mainWindow) throw new Error("No main window available")
   
-  const screenshotPath = await state.screenshotHelper?.takeScreenshot(
-    () => hideMainWindow(),
-    () => showMainWindow()
-  ) || ""
+  const screenshotPath = await state.screenshotHelper?.takeScreenshot(() => {
+    const win = state.mainWindow
+    if (!win || win.isDestroyed()) return () => {}
+
+    // Keep the native window in place: hide/show can activate another app
+    // (or the taskbar). Only make our overlay transparent during capture.
+    const opacity = state.isWindowVisible ? win.getOpacity() : 1
+    if (state.isWindowVisible) win.setOpacity(0)
+    screenshotCaptureWindow = win
+    return () => {
+      screenshotCaptureWindow = null
+      // Do not undo a manual hide or restore a window that has been closed.
+      if (!win.isDestroyed() && state.isWindowVisible) win.setOpacity(opacity)
+    }
+  }) || ""
   
   // IMPORTANT: Sync main state view with ScreenshotHelper's view
   // ScreenshotHelper resets to "queue" when taking a new screenshot
@@ -486,7 +500,7 @@ function showMainWindow(): void {
     win.setContentProtection(true)
     win.setOpacity(0)
     win.showInactive()
-    win.setOpacity(1)
+    if (screenshotCaptureWindow !== win) win.setOpacity(1)
     state.isWindowVisible = true
   }
 }

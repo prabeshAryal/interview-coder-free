@@ -13,6 +13,7 @@ export class ScreenshotHelper {
   private screenshotQueue: string[] = []
   private extraScreenshotQueue: string[] = []
   private readonly MAX_SCREENSHOTS = 2
+  private captureInProgress = false
 
   private readonly screenshotDir: string
   private readonly extraScreenshotDir: string
@@ -94,7 +95,7 @@ export class ScreenshotHelper {
   }
 
   private async captureScreenshotWindows(): Promise<Buffer> {
-    // Using PowerShell's native screenshot capability
+    // Capture without creating a console window or activating the taskbar.
     const tmpPath = path.join(app.getPath("temp"), `${uuidv4()}.png`)
     const script = `
       Add-Type -AssemblyName System.Windows.Forms
@@ -102,27 +103,39 @@ export class ScreenshotHelper {
       $screen = [System.Windows.Forms.Screen]::PrimaryScreen
       $bitmap = New-Object System.Drawing.Bitmap $screen.Bounds.Width, $screen.Bounds.Height
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-      $graphics.CopyFromScreen($screen.Bounds.X, $screen.Bounds.Y, 0, 0, $bitmap.Size)
-      $bitmap.Save('${tmpPath.replace(/\\/g, "\\\\")}')
-      $graphics.Dispose()
-      $bitmap.Dispose()
+      try {
+        $graphics.CopyFromScreen($screen.Bounds.X, $screen.Bounds.Y, 0, 0, $bitmap.Size)
+        $bitmap.Save('${tmpPath.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png)
+      } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+      }
     `
-    await execFileAsync("powershell", ["-command", script])
-    const buffer = await fs.promises.readFile(tmpPath)
-    await fs.promises.unlink(tmpPath)
-    return buffer
+    try {
+      await execFileAsync(
+        "powershell.exe",
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'; ${script}`],
+        { windowsHide: true }
+      )
+      return await fs.promises.readFile(tmpPath)
+    } finally {
+      await fs.promises.rm(tmpPath, { force: true })
+    }
   }
 
   public async takeScreenshot(
-    hideMainWindow: () => void,
-    showMainWindow: () => void
+    prepareWindowForCapture: () => () => void
   ): Promise<string> {
-    console.log("Taking screenshot in view:", this.view)
-    hideMainWindow()
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
+    // Repeated shortcuts must not restore the overlay during another capture.
+    if (this.captureInProgress) throw new Error("Screenshot already in progress")
+    this.captureInProgress = true
+    let restoreWindow = () => {}
     let screenshotPath = ""
     try {
+      console.log("Taking screenshot in view:", this.view)
+      restoreWindow = prepareWindowForCapture()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
       // Get screenshot buffer using native methods
       const screenshotBuffer =
         process.platform === "darwin"
@@ -163,8 +176,11 @@ export class ScreenshotHelper {
       console.error("Screenshot error:", error)
       throw error
     } finally {
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      showMainWindow()
+      try {
+        restoreWindow()
+      } finally {
+        this.captureInProgress = false
+      }
     }
 
     return screenshotPath
