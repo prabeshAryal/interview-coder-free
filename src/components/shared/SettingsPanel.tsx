@@ -18,7 +18,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
     const [isLanguageOpen, setIsLanguageOpen] = useState(false)
     const [isModelOpen, setIsModelOpen] = useState(false)
-    const [currentModel, setCurrentModel] = useState("gemini-4-hydrogen")
+    const [currentModel, setCurrentModel] = useState("gemini-3.5-flash-lite")
 
     // Only allow keyboard focus when actually typing in the API key input
     useEffect(() => {
@@ -49,13 +49,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     ]
 
     const models = [
-        { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen" },
         { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
-        { id: "gemini-4-argon", label: "Gemini 4 Argon" },
         { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
-        { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
-        { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash-Lite" },
-        { id: "gemini-3-flash-preview", label: "Gemini 3 Flash" }
+        { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen" },
     ]
 
     useEffect(() => {
@@ -72,8 +68,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 if (modelResult.success && modelResult.model && models.some(m => m.id === modelResult.model)) {
                     setCurrentModel(modelResult.model)
                 } else {
-                    setCurrentModel("gemini-4-hydrogen")
-                    await window.electronAPI.setModel("gemini-4-hydrogen")
+                    setCurrentModel("gemini-3.5-flash-lite")
+                    await window.electronAPI.setModel("gemini-3.5-flash-lite")
                 }
             } catch (error) {
                 console.error("Failed to load settings:", error)

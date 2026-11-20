@@ -7,12 +7,8 @@
  */
 export const GEMINI_MODELS = {
   GEMINI_4_HYDROGEN: "gemini-4-hydrogen",
-  GEMINI_3_5_FLASH_LITE: "gemini-3.5-flash-lite",
-  GEMINI_4_ARGON: "gemini-4-argon",
   GEMINI_3_8_FLASH: "gemini-3.8-flash",
-  GEMINI_3_6_FLASH: "gemini-3.6-flash",
-  GEMINI_3_1_FLASH_LITE: "gemini-3.1-flash-lite",
-  GEMINI_3_FLASH_PREVIEW: "gemini-3-flash-preview"
+  GEMINI_3_5_FLASH_LITE: "gemini-3.5-flash-lite",
 } as const
 
 export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
@@ -20,20 +16,16 @@ export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
 /**
  * Default model to use when no preference is set
  */
-export const DEFAULT_MODEL: GeminiModel = GEMINI_MODELS.GEMINI_4_HYDROGEN
+export const DEFAULT_MODEL: GeminiModel = GEMINI_MODELS.GEMINI_3_5_FLASH_LITE
 
 /**
  * Fallback chain - ordered from fastest/highest priority to lowest
  * When a model fails (503 busy, 429 rate limit, network), we try the next one
  */
 export const MODEL_FALLBACK_ORDER: GeminiModel[] = [
-  GEMINI_MODELS.GEMINI_4_HYDROGEN,
   GEMINI_MODELS.GEMINI_3_5_FLASH_LITE,
-  GEMINI_MODELS.GEMINI_4_ARGON,
   GEMINI_MODELS.GEMINI_3_8_FLASH,
-  GEMINI_MODELS.GEMINI_3_6_FLASH,
-  GEMINI_MODELS.GEMINI_3_1_FLASH_LITE,
-  GEMINI_MODELS.GEMINI_3_FLASH_PREVIEW
+  GEMINI_MODELS.GEMINI_4_HYDROGEN,
 ]
 
 /**
@@ -97,6 +89,20 @@ export function isNetworkError(error: any): boolean {
 }
 
 /**
+ * Check if a model identifier is unavailable or no longer supported
+ */
+export function isUnavailableModelError(error: any): boolean {
+  if (!error) return false
+  const errorStr = String(error.message || error)
+  return (
+    errorStr.includes("404") ||
+    errorStr.includes("NOT_FOUND") ||
+    errorStr.includes("is no longer available") ||
+    errorStr.includes("model is not found")
+  )
+}
+
+/**
  * Get user-friendly error message
  */
 export function getErrorMessage(error: any): string {
@@ -114,12 +120,8 @@ export function getErrorMessage(error: any): string {
  */
 export const MODEL_DISPLAY_NAMES: Record<GeminiModel, string> = {
   [GEMINI_MODELS.GEMINI_4_HYDROGEN]: "Gemini 4 Hydrogen",
-  [GEMINI_MODELS.GEMINI_3_5_FLASH_LITE]: "Gemini 3.5 Flash-Lite",
-  [GEMINI_MODELS.GEMINI_4_ARGON]: "Gemini 4 Argon",
   [GEMINI_MODELS.GEMINI_3_8_FLASH]: "Gemini 3.8 Flash",
-  [GEMINI_MODELS.GEMINI_3_6_FLASH]: "Gemini 3.6 Flash",
-  [GEMINI_MODELS.GEMINI_3_1_FLASH_LITE]: "Gemini 3.1 Flash-Lite",
-  [GEMINI_MODELS.GEMINI_3_FLASH_PREVIEW]: "Gemini 3 Flash"
+  [GEMINI_MODELS.GEMINI_3_5_FLASH_LITE]: "Gemini 3.5 Flash-Lite"
 }
 
 /**

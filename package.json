@@ -59,7 +59,8 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "dir"
       ],
       "icon": "assets/icons/win/icon.ico",
       "artifactName": "Windows-Defender-Windows-${version}.${ext}",

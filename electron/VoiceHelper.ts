@@ -7,6 +7,7 @@ import {
   getFallbackChain,
   isRateLimitError,
   isNetworkError,
+  isUnavailableModelError,
   getErrorMessage,
   RETRY_CONFIG,
   GeminiModel
@@ -175,10 +176,14 @@ export class VoiceHelper {
           break
         } catch (error: any) {
           console.warn(`[Voice Transcription] Model ${modelName} failed:`, error.message)
+
+          if (isUnavailableModelError(error)) {
+            console.log(`[Voice Transcription] Model ${modelName} is unavailable, trying next model...`)
+            continue
+          }
           
           if (isRateLimitError(error)) {
             console.log(`[Voice Transcription] Rate limit hit, trying next model...`)
-            await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
             continue
           }
           

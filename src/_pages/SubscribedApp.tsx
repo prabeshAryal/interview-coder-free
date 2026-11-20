@@ -63,33 +63,6 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
     }
   }, [])
 
-  // Dynamically update the window size
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    const updateDimensions = () => {
-      if (!containerRef.current) return
-      let height = containerRef.current.scrollHeight
-      let width = containerRef.current.scrollWidth
-      
-      // Ensure minimum dimensions to prevent window from collapsing
-      width = Math.max(width, 120)
-      height = Math.max(height, 80)
-      
-      window.electronAPI?.updateContentDimensions({ width, height })
-    }
-
-    const resizeObserver = new ResizeObserver(updateDimensions)
-    resizeObserver.observe(containerRef.current)
-
-    // Initial dimension update
-    updateDimensions()
-
-    return () => {
-      resizeObserver.disconnect()
-    }
-  }, [view])
-
   // Listen for events that might switch views or show errors
   useEffect(() => {
     const cleanupFunctions = [

@@ -9,6 +9,7 @@ import {
   DEFAULT_MODEL,
   getFallbackChain,
   isRateLimitError,
+  isUnavailableModelError,
   isNetworkError,
   getErrorMessage,
   RETRY_CONFIG,
@@ -22,6 +23,42 @@ let genAI: GoogleGenAI | null = null
 
 // Track the last successfully used model to emit to renderer
 let lastUsedModel: string = DEFAULT_MODEL
+
+function detectMimeType(base64Data: string): string {
+  if (base64Data.startsWith("iVBORw0KGgo")) return "image/png"
+  if (base64Data.startsWith("/9j/")) return "image/jpeg"
+  if (base64Data.startsWith("UklGR")) return "image/webp"
+  return "image/png"
+}
+
+function extractJsonFromResponse(raw: string): any {
+  if (!raw) return null
+  const text = raw.trim()
+
+  // 1. Direct JSON parse
+  try {
+    return JSON.parse(text)
+  } catch {}
+
+  // 2. Fenced ```json ... ``` or ``` ... ```
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  if (jsonMatch && jsonMatch[1]) {
+    try {
+      return JSON.parse(jsonMatch[1].trim())
+    } catch {}
+  }
+
+  // 3. Outermost curly braces { ... }
+  const firstBrace = text.indexOf("{")
+  const lastBrace = text.lastIndexOf("}")
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.substring(firstBrace, lastBrace + 1))
+    } catch {}
+  }
+
+  return null
+}
 
 // Conversation history for context preservation
 interface ConversationMessage {
@@ -73,6 +110,7 @@ export class ProcessingHelper {
   // AbortControllers for API requests
   private currentProcessingAbortController: AbortController | null = null
   private currentExtraProcessingAbortController: AbortController | null = null
+  private isProcessingScreenshots = false
 
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps
@@ -123,14 +161,13 @@ export class ProcessingHelper {
     const models = getFallbackChain(userModel)
     
     let lastError: any
-    let successfulModel: string | null = null
-
     for (const modelName of models) {
       if (signal?.aborted) {
         throw new Error("CanceledError")
       }
 
       try {
+        const requestStartedAt = Date.now()
         console.log(`[Gemini Request - ${context}] Attempting with model: ${modelName}`)
 
         const response = await genAI.models.generateContent({
@@ -146,12 +183,11 @@ export class ProcessingHelper {
             }
           ]
         })
+        const responseText = response.text || ""
 
-        const responseText = response.text
-        console.log(`[Gemini Response - ${context}] Success with ${modelName}`)
+        console.log(`[Gemini Response - ${context}] Success with ${modelName} in ${Date.now() - requestStartedAt}ms`)
         
         // Track successful model for UI display
-        successfulModel = modelName
         lastUsedModel = modelName
         
         // Emit model used event to renderer
@@ -166,53 +202,21 @@ export class ProcessingHelper {
         console.warn(`[Gemini Error - ${context}] Model ${modelName} failed:`, errorMessage)
         lastError = error
 
+        if (isUnavailableModelError(error)) {
+          console.log(`[Gemini Fallback - ${context}] Model ${modelName} is unavailable, trying next model...`)
+          continue
+        }
+
         // Check if it's a rate limit error - try next model silently
         if (isRateLimitError(error)) {
           console.log(`[Gemini Fallback - ${context}] Rate limit hit on ${modelName}, trying next model...`)
-          
-          // Small delay before trying next model
-          await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
           continue
         }
 
         // Check if it's a network error - retry with delay
         if (isNetworkError(error)) {
-          console.log(`[Gemini Retry - ${context}] Network error on ${modelName}, retrying...`)
-          await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.BASE_DELAY_MS))
-          
-          // Retry the same model once for network errors
-          try {
-            const retryResponse = await genAI.models.generateContent({
-              model: modelName,
-              config: {
-                systemInstruction: systemInstruction,
-                responseMimeType: jsonMode ? "application/json" : "text/plain"
-              },
-              contents: [
-                {
-                  role: "user",
-                  parts: promptParts
-                }
-              ]
-            })
-            
-            const retryText = retryResponse.text
-            console.log(`[Gemini Retry Success - ${context}] Success with ${modelName} after retry`)
-            
-            successfulModel = modelName
-            lastUsedModel = modelName
-            
-            const mainWindow = this.deps.getMainWindow()
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send("model-used", modelName)
-            }
-            
-            return retryText || ""
-          } catch (retryError: any) {
-            console.warn(`[Gemini Retry Failed - ${context}] Model ${modelName} failed on retry:`, retryError.message)
-            lastError = retryError
-            continue
-          }
+          console.log(`[Gemini Fallback - ${context}] Network error on ${modelName}, trying next model...`)
+          continue
         }
 
         // For other errors, continue to next model
@@ -285,6 +289,10 @@ export class ProcessingHelper {
   public async processScreenshots(): Promise<void> {
     const mainWindow = this.deps.getMainWindow()
     if (!mainWindow) return
+    if (this.isProcessingScreenshots) {
+      console.log("Ignoring duplicate screenshot processing trigger while a request is in progress")
+      return
+    }
 
     // Credits check is bypassed - we always have enough credits
 
@@ -292,11 +300,13 @@ export class ProcessingHelper {
     console.log("Processing screenshots in view:", view)
 
     if (view === "queue") {
+      this.isProcessingScreenshots = true
       this.deps.setView("solutions")
       mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
       const screenshotQueue = this.screenshotHelper.getScreenshotQueue()
       console.log("Processing main queue screenshots:", screenshotQueue)
       if (screenshotQueue.length === 0) {
+        this.isProcessingScreenshots = false
         mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
         return
       }
@@ -306,8 +316,16 @@ export class ProcessingHelper {
         this.currentProcessingAbortController = new AbortController()
         const { signal } = this.currentProcessingAbortController
 
+        const validScreenshotPaths = screenshotQueue.filter((path) => fs.existsSync(path))
+        if (validScreenshotPaths.length === 0) {
+          this.isProcessingScreenshots = false
+          mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
+          this.deps.setView("queue")
+          return
+        }
+
         const screenshots = await Promise.all(
-          screenshotQueue.map(async (path) => ({
+          validScreenshotPaths.map(async (path) => ({
             path,
             preview: await this.screenshotHelper.getImagePreview(path),
             data: fs.readFileSync(path).toString("base64")
@@ -328,9 +346,7 @@ export class ProcessingHelper {
               "Gemini API key not found. Please set the API Key in Settings."
             )
           } else {
-            // Check if we recently sent this error to avoid jitter
             const errorMessage = result.error || "Unknown error"
-            // Only send if it's different or enough time has passed (simple debounce)
             mainWindow.webContents.send(
               this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
               errorMessage
@@ -371,13 +387,20 @@ export class ProcessingHelper {
         this.deps.setView("queue")
       } finally {
         this.currentProcessingAbortController = null
+        this.isProcessingScreenshots = false
       }
     } else {
       // view == 'solutions'
+      if (this.isProcessingScreenshots) {
+        console.log("Ignoring duplicate debug processing trigger while a request is in progress")
+        return
+      }
+      this.isProcessingScreenshots = true
       const extraScreenshotQueue =
         this.screenshotHelper.getExtraScreenshotQueue()
       console.log("Processing extra queue screenshots:", extraScreenshotQueue)
       if (extraScreenshotQueue.length === 0) {
+        this.isProcessingScreenshots = false
         mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
         return
       }
@@ -434,6 +457,7 @@ export class ProcessingHelper {
         }
       } finally {
         this.currentExtraProcessingAbortController = null
+        this.isProcessingScreenshots = false
       }
     }
   }
@@ -447,52 +471,157 @@ export class ProcessingHelper {
       const mainWindow = this.deps.getMainWindow()
       const language = await this.getLanguage()
 
+      // Get conversation context for continuity
+      const conversationContext = getConversationContext()
+      const contextSection = conversationContext
+        ? `\n\nPrevious conversation context (for reference):\n${conversationContext}\n\n---\n`
+        : ""
+
+      const systemPrompt = `You are an expert coding interview assistant and competitive programming master.
+Analyze the provided screenshot(s) containing a coding problem, question, or code.
+Respond ENTIRELY in ${RESPONSE_LANGUAGE}. Be concise, highly accurate, and focus on optimal solutions.
+${contextSection ? "Use the previous conversation context to provide continuity if the current question relates to earlier discussions." : ""}
+
+Instructions:
+1. Extract the complete problem statement and any provided starter code / snippets from the images into "problem_statement".
+2. If possible, provide a very brief, direct answer to the problem first in "short_answer" (e.g., final output value, return value, or direct answer). Set to null if not applicable.
+3. Provide the clean, optimal, production-ready code solution in ${language} in "code". Comments within code MUST be in ${RESPONSE_LANGUAGE}.
+4. Provide step-by-step reasoning in "thoughts" (array of strings in ${RESPONSE_LANGUAGE}).
+5. Provide time complexity analysis in "time_complexity" (e.g. "O(n)").
+6. Provide space complexity analysis in "space_complexity" (e.g. "O(1)").
+
+Output MUST be a valid JSON object matching this schema:
+{
+  "problem_statement": string,
+  "short_answer": string | null,
+  "code": string,
+  "thoughts": string[],
+  "time_complexity": string,
+  "space_complexity": string
+}
+
+If the problem statement is incomplete or unclear, extract whatever is visible into "problem_statement", set "short_answer" to null, explain the issue clearly in the "thoughts" field (in ${RESPONSE_LANGUAGE}), and set "code" to an empty string or a relevant placeholder comment.`
+
       const promptParts: Part[] = [
-        { text: `Extract the coding problem statement AND the relevant code snippet from these images. The problem might be stated as a question (e.g., "What will this code output?"). Ensure you include the actual code itself, not just the question. Programming Language: ${language}. Respond in ${RESPONSE_LANGUAGE}. Return the combined problem statement and code.` },
-        ...imageDataList.map(image => ({
+        {
+          text: `${contextSection}Extract the coding problem statement and any code snippets from the attached screenshot(s), solve it in ${language}, and return the full JSON response.`
+        },
+        ...imageDataList.map((image) => ({
           inlineData: {
             data: image,
-            mimeType: "image/jpeg"
+            mimeType: detectMimeType(image)
           }
         }))
-      ];
+      ]
 
-      const problemInfo = await this.callAIWithFallback(
-        "Extract",
-        "You are an expert coding assistant.",
+      console.log(`[ProcessingHelper] Initiating single-pass solve with ${imageDataList.length} screenshots in ${language}`)
+
+      const rawContent = await this.callAIWithFallback(
+        "Solve",
+        systemPrompt,
         promptParts,
-        false,
+        true,
         signal
-      );
+      )
 
-      // Store problem info in AppState
-      this.deps.setProblemInfo({ problem_statement: problemInfo })
+      let structuredData = {
+        problem_statement: "Problem statement extracted from screenshots.",
+        short_answer: null as string | null,
+        code: "",
+        thoughts: ["Failed to parse AI response."],
+        time_complexity: "N/A",
+        space_complexity: "N/A"
+      }
 
-      // Send first success event
-      if (mainWindow) {
-        mainWindow.webContents.send(
-          this.deps.PROCESSING_EVENTS.PROBLEM_EXTRACTED,
-          { problem_statement: problemInfo }
-        )
+      try {
+        const parsed = extractJsonFromResponse(rawContent)
+        if (parsed && typeof parsed === "object") {
+          const problemStatement =
+            typeof parsed.problem_statement === "string" && parsed.problem_statement.trim()
+              ? parsed.problem_statement
+              : "Problem statement extracted from screenshots."
+          const shortAnswer = parsed.short_answer || null
+          const code =
+            typeof parsed.code === "string" && parsed.code.trim()
+              ? parsed.code
+              : (shortAnswer ? `// Short Answer: ${shortAnswer}` : "// Solution generated successfully.")
+          const thoughts =
+            Array.isArray(parsed.thoughts) && parsed.thoughts.length > 0
+              ? parsed.thoughts.map(String)
+              : [String(parsed.thoughts || `Analysis completed in ${RESPONSE_LANGUAGE}.`)]
+          const timeComplexity = parsed.time_complexity || "N/A"
+          const spaceComplexity = parsed.space_complexity || "N/A"
 
-        // Generate solutions after successful extraction
-        const solutionsResult = await this.generateSolutionsHelper(signal)
-        if (solutionsResult.success) {
-          // Clear any existing extra screenshots before transitioning to solutions view
-          this.screenshotHelper.clearExtraScreenshotQueue()
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-            solutionsResult.data
-          )
-          return { success: true, data: solutionsResult.data }
+          structuredData = {
+            problem_statement: problemStatement,
+            short_answer: shortAnswer,
+            code: code,
+            thoughts: thoughts,
+            time_complexity: timeComplexity,
+            space_complexity: spaceComplexity
+          }
         } else {
-          throw new Error(
-            solutionsResult.error || "Failed to generate solutions"
-          )
+          // If JSON extraction failed, use rawContent as code
+          structuredData = {
+            problem_statement: "Problem statement extracted from screenshots.",
+            short_answer: null,
+            code: rawContent || "// No code generated",
+            thoughts: [`AI response received in text format.`, rawContent],
+            time_complexity: "N/A",
+            space_complexity: "N/A"
+          }
+        }
+      } catch (parseError) {
+        console.warn(`Failed to parse AI response as JSON (language: ${RESPONSE_LANGUAGE}). Raw content:`, rawContent)
+        structuredData = {
+          problem_statement: "Could not cleanly parse problem statement from AI response.",
+          short_answer: null,
+          code: rawContent || "// Raw AI Response",
+          thoughts: [`The AI response could not be parsed as valid JSON.`, "Raw AI Response:", rawContent],
+          time_complexity: "N/A",
+          space_complexity: "N/A"
         }
       }
 
-      return { success: false, error: "Main window not available" }
+      // Store problem info and solution in AppState
+      this.deps.setProblemInfo({
+        problem_statement: structuredData.problem_statement,
+        solution: structuredData.code
+      })
+
+      // Add to conversation history
+      conversationHistory.push({
+        role: "user",
+        content: `Problem: ${structuredData.problem_statement}`,
+        timestamp: Date.now()
+      })
+
+      const responseSummary = structuredData.short_answer
+        ? `Answer: ${structuredData.short_answer}`
+        : `Solution provided with ${structuredData.thoughts.length} thoughts`
+
+      conversationHistory.push({
+        role: "assistant",
+        content: responseSummary + (structuredData.code ? `\nCode: ${structuredData.code.substring(0, 300)}...` : ""),
+        timestamp: Date.now()
+      })
+
+      if (conversationHistory.length > MAX_HISTORY_MESSAGES * 2) {
+        conversationHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES * 2)
+      }
+
+      // Clear extra screenshot queue
+      this.screenshotHelper.clearExtraScreenshotQueue()
+
+      // Send PROBLEM_EXTRACTED event so UI has problem statement in query cache
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.PROBLEM_EXTRACTED,
+          { problem_statement: structuredData.problem_statement }
+        )
+      }
+
+      return { success: true, data: structuredData }
     } catch (error: any) {
       if (error.name === "CanceledError") {
         return {
@@ -504,147 +633,7 @@ export class ProcessingHelper {
       console.error("Processing error details:", {
         message: error.message,
         code: error.code,
-        response: error.response,
-      })
-
-      return { success: false, error: error.message }
-    }
-  }
-
-  private async generateSolutionsHelper(signal: AbortSignal) {
-    try {
-      const problemInfo = this.deps.getProblemInfo()
-      const language = await this.getLanguage()
-
-      if (!problemInfo) {
-        throw new Error("No problem info available")
-      }
-
-      // Get conversation context for continuity
-      const conversationContext = getConversationContext()
-      const contextSection = conversationContext 
-        ? `\n\nPrevious conversation context (for reference):\n${conversationContext}\n\n---\n`
-        : ""
-
-      const systemPrompt = `You are an expert coding assistant. Analyze the provided problem and code snippet.
-Respond ENTIRELY in ${RESPONSE_LANGUAGE}. Be concise and focus on the essential information.
-${contextSection ? "Use the previous conversation context to provide continuity if the current question relates to earlier discussions." : ""}
-
-Instructions:
-1.  If possible, provide a very brief, direct answer to the problem first (e.g., the final output value or a direct yes/no).
-2.  Then, provide the detailed explanation, code, and complexity analysis.
-3.  Generate a response in JSON format containing the following fields:
-    - "short_answer": (Nullable string) A very brief, direct answer to the problem, if applicable (e.g., the program's output). Use null if not applicable. MUST be in ${RESPONSE_LANGUAGE}.
-    - "code": (String) The corrected or proposed code solution in ${language}. Comments within the code MUST be in ${RESPONSE_LANGUAGE}.
-    - "thoughts": (Array of strings) Explanation of your thought process, step-by-step. MUST be in ${RESPONSE_LANGUAGE}.
-    - "time_complexity": (String) Time complexity analysis (e.g., "O(n)"). MUST be in ${RESPONSE_LANGUAGE}.
-    - "space_complexity": (String) Space complexity analysis (e.g., "O(1)"). MUST be in ${RESPONSE_LANGUAGE}.
-
-If the problem statement is incomplete or unclear, set "short_answer" to null, explain the issue clearly in the "thoughts" field (in ${RESPONSE_LANGUAGE}), and set "code" to an empty string or a relevant placeholder comment (in ${RESPONSE_LANGUAGE}).`;
-
-      const userPrompt = `${contextSection}Problem and Code:\n\`\`\`\n${problemInfo.problem_statement}\n\`\`\`\n\nGenerate the JSON response as described in the system prompt.`;
-
-      // Add user message to history
-      conversationHistory.push({
-        role: "user",
-        content: `Problem: ${problemInfo.problem_statement}`,
-        timestamp: Date.now()
-      })
-
-      const rawContent = await this.callAIWithFallback(
-        "Generate",
-        systemPrompt,
-        [{ text: userPrompt }],
-        true,
-        signal
-      );
-      let structuredData = {
-        short_answer: null as string | null,
-        code: "",
-        thoughts: ["Failed to parse AI response."],
-        time_complexity: "N/A",
-        space_complexity: "N/A"
-      };
-
-      try {
-        let jsonToParse = rawContent.trim();
-        // Check if the response is wrapped in markdown code fences and extract JSON
-        if (jsonToParse.startsWith("```json") && jsonToParse.endsWith("```")) {
-          jsonToParse = jsonToParse.substring(7, jsonToParse.length - 3).trim();
-        } else if (jsonToParse.startsWith("```") && jsonToParse.endsWith("```")) {
-          // Handle generic ``` ``` fences as well
-          jsonToParse = jsonToParse.substring(3, jsonToParse.length - 3).trim();
-        }
-
-        // Attempt to parse the (potentially extracted) JSON
-        const parsed = JSON.parse(jsonToParse);
-        // Basic validation to ensure it has the expected structure (including optional short_answer)
-        if (parsed && typeof parsed === 'object' && 'code' in parsed && 'thoughts' in parsed && 'time_complexity' in parsed && 'space_complexity' in parsed) {
-          structuredData = {
-            short_answer: parsed.short_answer || null,
-            code: parsed.code || "",
-            thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [String(parsed.thoughts || `No thoughts provided in ${RESPONSE_LANGUAGE}.`)],
-            time_complexity: parsed.time_complexity || "N/A",
-            space_complexity: parsed.space_complexity || "N/A"
-          };
-        } else {
-          // If parsing succeeds but structure is wrong, put raw content in thoughts
-          structuredData.thoughts = [`Received unexpected structure from AI (in ${RESPONSE_LANGUAGE}):`, rawContent];
-          structuredData.code = `// AI Response (unexpected format):\n${rawContent}`;
-          structuredData.short_answer = null;
-        }
-      } catch (parseError) {
-        // If JSON parsing fails, return the raw string as 'code' and add a thought
-        console.warn(`Failed to parse OpenAI response as JSON (language: ${RESPONSE_LANGUAGE}). Raw content:`, rawContent);
-        // Improved error handling for non-JSON responses
-        structuredData = {
-          short_answer: null,
-          code: `// Error: Could not process the response from the AI.`,
-          thoughts: [`The AI response could not be understood (expected JSON format). Response language set to ${RESPONSE_LANGUAGE}.`, "Raw AI Response:", rawContent],
-          time_complexity: "N/A",
-          space_complexity: "N/A"
-        };
-      }
-
-      // Add assistant response to history for context continuity
-      const responseSummary = structuredData.short_answer 
-        ? `Answer: ${structuredData.short_answer}` 
-        : `Solution provided with ${structuredData.thoughts.length} thoughts`
-      conversationHistory.push({
-        role: "assistant",
-        content: responseSummary + (structuredData.code ? `\nCode: ${structuredData.code.substring(0, 300)}...` : ""),
-        timestamp: Date.now()
-      })
-      
-      // Trim history if too long
-      if (conversationHistory.length > MAX_HISTORY_MESSAGES * 2) {
-        conversationHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES * 2)
-      }
-
-      return { success: true, data: structuredData }
-    } catch (error: any) {
-      if (error.name === "CanceledError") {
-        this.cancelOngoingRequests()
-        this.deps.clearQueues()
-        this.deps.setView("queue")
-        const mainWindow = this.deps.getMainWindow()
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("reset-view")
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Request timed out. The server took too long to respond. Please try again."
-          )
-        }
-        return {
-          success: false,
-          error: "Request timed out. Please try again."
-        }
-      }
-
-      console.error("Generate error details:", {
-        message: error.message,
-        code: error.code,
-        response: error.response,
+        response: error.response
       })
 
       return { success: false, error: error.message }
@@ -671,7 +660,7 @@ If the problem statement is incomplete or unclear, set "short_answer" to null, e
         ...imageDataList.map(image => ({
           inlineData: {
             data: image,
-            mimeType: "image/jpeg"
+            mimeType: detectMimeType(image)
           }
         }))
       ];

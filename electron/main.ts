@@ -172,22 +172,20 @@ async function takeScreenshot(): Promise<string> {
     const win = state.mainWindow
     if (!win || win.isDestroyed()) return () => {}
 
-    // Keep the native window in place: hide/show can activate another app
-    // (or the taskbar). Only make our overlay transparent during capture.
-    const targetOpacity = 1
-    if (state.isWindowVisible) win.setOpacity(0)
+    // Because setContentProtection(true) (WDA_EXCLUDEFROMCAPTURE) is active,
+    // the window is already excluded from all screenshots natively by Windows DWM.
+    // Toggling opacity (0 -> 1) triggers DWM layer changes that cause the taskbar
+    // to pop up over fullscreen applications. We keep opacity untouched.
     screenshotCaptureWindow = win
     return () => {
       screenshotCaptureWindow = null
-      // Do not undo a manual hide or restore a window that has been closed.
-      if (!win.isDestroyed() && state.isWindowVisible) win.setOpacity(targetOpacity)
     }
   }) || ""
   
   // IMPORTANT: Sync main state view with ScreenshotHelper's view
   // ScreenshotHelper resets to "queue" when taking a new screenshot
   // We must also update main state so ProcessingHelper uses correct view
-  state.view = "queue"
+  setView("queue")
   
   return screenshotPath
 }
@@ -330,7 +328,7 @@ async function createWindow(): Promise<void> {
     backgroundColor: "#00000000",
     focusable: false,
     skipTaskbar: true,
-    type: "panel",
+    type: process.platform === "darwin" ? "panel" : "toolbar",
     paintWhenInitiallyHidden: true,
     titleBarStyle: "hidden",
     enableLargerThanScreen: true,
@@ -380,7 +378,11 @@ async function createWindow(): Promise<void> {
   state.mainWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true
   })
-  state.mainWindow.setAlwaysOnTop(true, "screen-saver", 1)
+  if (process.platform === "win32") {
+    state.mainWindow.setAlwaysOnTop(true)
+  } else {
+    state.mainWindow.setAlwaysOnTop(true, "screen-saver", 1)
+  }
 
   // Additional screen capture resistance settings
   if (process.platform === "darwin") {
@@ -552,6 +554,8 @@ function resetWindowPosition(): void {
 }
 
 // Window dimension functions  
+let dimensionDebounceTimer: NodeJS.Timeout | null = null
+
 function setWindowDimensions(width: number, height: number): void {
   if (!state.mainWindow?.isDestroyed()) {
     const isSolutionMode = state.view === "solutions" || state.view === "debug"
@@ -561,8 +565,8 @@ function setWindowDimensions(width: number, height: number): void {
     const workArea = primaryDisplay.workArea
 
     // Pill mode: wider to accommodate voice controls and tall enough for settings panel
-    const PILL_WIDTH = 520
-    const PILL_HEIGHT = 400 // Fixed height so settings panel and dropdowns are never cut off
+    const PILL_WIDTH = Math.max(520, width)
+    const PILL_HEIGHT = Math.max(540, height) // Ensure settings panel and dropdowns are never cut off
 
     // Solution mode: use most of the screen width
     const SOLUTION_MIN_WIDTH = 650
@@ -570,7 +574,7 @@ function setWindowDimensions(width: number, height: number): void {
     const SOLUTION_WIDTH = Math.max(SOLUTION_MIN_WIDTH, Math.min(width + 80, SOLUTION_MAX_WIDTH))
     
     // Height based on content, allow it to be tall
-    const SOLUTION_HEIGHT = Math.max(height + 80, 500)
+    const SOLUTION_HEIGHT = Math.max(height + 80, 200)
 
     let finalWidth: number
     let finalHeight: number
@@ -607,12 +611,21 @@ function setWindowDimensions(width: number, height: number): void {
       ) {
         return
       }
-      state.mainWindow.setBounds({
-        x: centerX,
-        y: bottomY,
-        width: finalWidth,
-        height: finalHeight
-      })
+      
+      // Debounce window bounds updates to prevent DWM thrashing and taskbar flickering
+      if (dimensionDebounceTimer) {
+        clearTimeout(dimensionDebounceTimer)
+      }
+      dimensionDebounceTimer = setTimeout(() => {
+        if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+          state.mainWindow.setBounds({
+            x: centerX,
+            y: bottomY,
+            width: finalWidth,
+            height: finalHeight
+          })
+        }
+      }, 50)
     }
     state.windowSize = { width: finalWidth, height: finalHeight }
     state.lastDimensions = { width: finalWidth, height: finalHeight, mode }

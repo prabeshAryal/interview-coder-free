@@ -99,7 +99,7 @@ export const ContentSection = ({
     {isLoading ? (
       <div className="mt-3 flex items-center gap-2">
         <div className="w-3 h-3 rounded-full border-2 border-white/20 border-t-indigo-500 animate-spin" />
-        <p className="text-sm text-white/50">Extracting...</p>
+        <p className="text-sm text-white/50">Solving problem...</p>
       </div>
     ) : (
       <div className="text-[13px] leading-relaxed text-white/80 w-full">
@@ -379,6 +379,7 @@ const Solutions: React.FC<SolutionsProps> = ({
       }),
       window.electronAPI.onProblemExtracted((data) => {
         queryClient.setQueryData(["problem_statement"], data)
+        setProblemStatementData(data)
       }),
       //if there was an error processing the initial solution
       window.electronAPI.onSolutionError((error: string) => {
@@ -411,18 +412,18 @@ const Solutions: React.FC<SolutionsProps> = ({
         // Expect data to potentially have short_answer
         const solutionPayload = {
           short_answer: data.short_answer, // Include short_answer
-          code: data.code,
-          thoughts: data.thoughts,
-          time_complexity: data.time_complexity,
-          space_complexity: data.space_complexity
+          code: data.code || "// Solution generated successfully",
+          thoughts: Array.isArray(data.thoughts) ? data.thoughts : [String(data.thoughts || "")],
+          time_complexity: data.time_complexity || "N/A",
+          space_complexity: data.space_complexity || "N/A"
         };
 
         queryClient.setQueryData(["solution"], solutionPayload);
         setShortAnswerData(solutionPayload.short_answer ?? null); // Correctly set short answer state using ?? null
-        setSolutionData(solutionPayload.code || null);
-        setThoughtsData(solutionPayload.thoughts || null);
-        setTimeComplexityData(solutionPayload.time_complexity || null);
-        setSpaceComplexityData(solutionPayload.space_complexity || null);
+        setSolutionData(solutionPayload.code);
+        setThoughtsData(solutionPayload.thoughts);
+        setTimeComplexityData(solutionPayload.time_complexity);
+        setSpaceComplexityData(solutionPayload.space_complexity);
 
         // Fetch latest screenshots when solution is successful
         const fetchScreenshots = async () => {
@@ -565,7 +566,7 @@ const Solutions: React.FC<SolutionsProps> = ({
         />
       ) : (
         // Main container - Minimal Design
-        <div ref={contentRef} className="w-full min-w-0 px-4 py-4">
+        <div ref={contentRef} className="w-full min-w-0 px-4 py-4 select-none">
           {/* Pill/Commands row */}
           <div className="mb-4">
             <SolutionCommands
