@@ -6,7 +6,7 @@
     "clean": "rimraf dist dist-electron",
     "dev": "cross-env NODE_ENV=production npm run clean && vite build && tsc -p tsconfig.electron.json && node run-electron.js",
     "dev:prod": "cross-env NODE_ENV=production npm run clean && vite build && tsc -p tsconfig.electron.json && node run-electron.js",
-    "build": "cross-env NODE_ENV=production rimraf dist dist-electron && vite build && tsc -p tsconfig.electron.json && electron-builder"
+    "build": "cross-env NODE_ENV=production rimraf dist dist-electron && vite build && tsc -p tsconfig.electron.json && node -e \"require('fs').copyFileSync('electron/screencap.exe', 'dist-electron/screencap.exe')\" && electron-builder --win"
   },
   "build": {
     "appId": "com.prabesh.windowsdefender",
