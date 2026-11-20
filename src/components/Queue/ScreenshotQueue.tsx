@@ -28,7 +28,7 @@ const ScreenshotQueue: React.FC<ScreenshotQueueProps> = ({
     // LAYOUT CONTROL: Container for screenshot thumbnails
     // 'gap-4' controls the space between thumbnails.
     // 'justify-start' aligns them to the left.
-    <div className="flex gap-4 justify-start">
+    <div className="flex gap-4 justify-start interactive-area">
       {displayScreenshots.map((screenshot, index) => (
         <ScreenshotItem
           key={screenshot.path}

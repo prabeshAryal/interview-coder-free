@@ -568,7 +568,7 @@ const Solutions: React.FC<SolutionsProps> = ({
         // Main container - Minimal Design
         <div ref={contentRef} className="w-full min-w-0 px-4 py-4 select-none">
           {/* Pill/Commands row */}
-          <div className="mb-4">
+          <div className="mb-4 interactive-area">
             <SolutionCommands
               onTooltipVisibilityChange={handleTooltipVisibilityChange}
               isProcessing={!problemStatementData || !solutionData}
@@ -581,7 +581,7 @@ const Solutions: React.FC<SolutionsProps> = ({
           </div>
 
           {/* Main Content - Minimal Glass Panel */}
-          <div className="w-full glass-panel rounded-xl overflow-hidden">
+          <div className="w-full glass-panel rounded-xl overflow-hidden interactive-area">
             <div className="px-4 py-4 space-y-4">
               {/* Model indicator */}
               {currentModel && (

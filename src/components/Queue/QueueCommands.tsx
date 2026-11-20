@@ -63,8 +63,16 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       }
     }
 
+    const handleBlur = () => {
+      setIsPanelOpen(false)
+    }
+
     document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
+    window.addEventListener("blur", handleBlur)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+      window.removeEventListener("blur", handleBlur)
+    }
   }, [])
 
   // Listen for voice error events
@@ -84,7 +92,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       {/* The Pill - Centered at bottom */}
       <div
         ref={pillRef}
-        className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-[9999] flex items-center gap-3 px-3 py-2 bg-[#0a0a0a]/90 backdrop-blur-md border border-white/10 rounded-full shadow-2xl transition-all duration-300 hover:bg-[#0a0a0a] group"
+        className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-[9999] flex items-center gap-3 px-3 py-2 bg-[#0a0a0a]/90 backdrop-blur-md border border-white/10 rounded-full shadow-2xl transition-all duration-300 hover:bg-[#0a0a0a] group interactive-area cursor-interactive"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
@@ -121,21 +129,20 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         </button>
       </div>
 
-      {/* Expanded Settings Panel - Centered above pill */}
-      <div
-        ref={panelRef}
-        className={`fixed bottom-16 left-1/2 transform -translate-x-1/2 w-72 bg-[#0a0a0a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-visible transition-all duration-300 origin-bottom z-[9998] max-h-[70vh] overflow-y-auto ${isPanelOpen
-          ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
-          : "opacity-0 scale-95 translate-y-4 pointer-events-none"
-          }`}
-      >
-        <div className="p-3">
-          <SettingsPanel
-            currentLanguage={currentLanguage}
-            setLanguage={setLanguage}
-          />
+      {/* Expanded Settings Panel - Centered above pill (only rendered when open) */}
+      {isPanelOpen && (
+        <div
+          ref={panelRef}
+          className="fixed bottom-16 left-1/2 transform -translate-x-1/2 w-72 bg-[#0a0a0a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-visible z-[9998] max-h-[70vh] overflow-y-auto interactive-area"
+        >
+          <div className="p-3">
+            <SettingsPanel
+              currentLanguage={currentLanguage}
+              setLanguage={setLanguage}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </>
   )
 }

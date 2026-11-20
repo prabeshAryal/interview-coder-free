@@ -292,8 +292,8 @@ async function createWindow(): Promise<void> {
   state.screenHeight = workArea.height
   state.step = 60
   
-  const initialWidth = 520
-  const initialHeight = 400
+  const initialWidth = 260
+  const initialHeight = 80
   const horizontalInset = 40
   const verticalInset = 24
   const leftAnchor = Math.max(workArea.x + horizontalInset, workArea.x)
@@ -420,6 +420,7 @@ async function createWindow(): Promise<void> {
 
   // Show inactive so no focus is stolen from the active application
   state.mainWindow.showInactive()
+  state.mainWindow.setIgnoreMouseEvents(true, { forward: true })
 }
 
 function handleWindowMove(): void {
@@ -564,9 +565,11 @@ function setWindowDimensions(width: number, height: number): void {
     const primaryDisplay = screen.getPrimaryDisplay()
     const workArea = primaryDisplay.workArea
 
-    // Pill mode: wider to accommodate voice controls and tall enough for settings panel
-    const PILL_WIDTH = Math.max(520, width)
-    const PILL_HEIGHT = Math.max(540, height) // Ensure settings panel and dropdowns are never cut off
+    // Pill mode: dynamically size to content
+    // When settings is closed: compact (~240x80) so it doesn't obstruct the screen
+    // When settings is open: expands to fit the full panel (~390x620)
+    const PILL_WIDTH = Math.max(240, Math.min(width + 40, 520))
+    const PILL_HEIGHT = Math.max(70, Math.min(height + 20, 680))
 
     // Solution mode: use most of the screen width
     const SOLUTION_MIN_WIDTH = 650

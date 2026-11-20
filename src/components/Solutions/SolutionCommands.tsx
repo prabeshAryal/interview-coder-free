@@ -75,8 +75,16 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
       }
     }
 
+    const handleBlur = () => {
+      setIsPanelOpen(false)
+    }
+
     document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
+    window.addEventListener("blur", handleBlur)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+      window.removeEventListener("blur", handleBlur)
+    }
   }, [])
 
   // Notify parent about panel visibility
@@ -92,7 +100,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
         <div
           ref={pillRef}
           onClick={() => setIsPanelOpen(!isPanelOpen)}
-          className="shrink-0 flex items-center gap-2.5 px-4 py-2 bg-[#0a0a0a]/90 backdrop-blur-md border border-white/10 rounded-full shadow-lg cursor-pointer hover:bg-[#0a0a0a] hover:border-white/20 transition-all duration-200"
+          className="shrink-0 flex items-center gap-2.5 px-4 py-2 bg-[#0a0a0a]/90 backdrop-blur-md border border-white/10 rounded-full shadow-lg cursor-pointer hover:bg-[#0a0a0a] hover:border-white/20 transition-all duration-200 interactive-area cursor-interactive"
         >
           {/* Recording Indicator or Online Indicator */}
           {isRecording ? (
@@ -135,7 +143,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
       {isPanelOpen && (
         <div
           ref={panelRef}
-          className="fixed w-72 bg-[#0a0a0a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-visible z-[9999] max-h-[70vh] overflow-y-auto"
+          className="fixed w-72 bg-[#0a0a0a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-visible z-[9999] max-h-[70vh] overflow-y-auto interactive-area"
           style={{
             bottom: panelPosition.bottom,
             left: Math.max(16, panelPosition.left) // Ensure minimum left margin
