@@ -7,7 +7,6 @@
  */
 export const GEMINI_MODELS = {
   GEMINI_4_HYDROGEN: "gemini-4-hydrogen",
-  GEMINI_3_8_FLASH: "gemini-3.8-flash",
   GEMINI_3_5_FLASH_LITE: "gemini-3.5-flash-lite",
 } as const
 
@@ -24,7 +23,6 @@ export const DEFAULT_MODEL: GeminiModel = GEMINI_MODELS.GEMINI_3_5_FLASH_LITE
  */
 export const MODEL_FALLBACK_ORDER: GeminiModel[] = [
   GEMINI_MODELS.GEMINI_3_5_FLASH_LITE,
-  GEMINI_MODELS.GEMINI_3_8_FLASH,
   GEMINI_MODELS.GEMINI_4_HYDROGEN,
 ]
 
@@ -120,7 +118,6 @@ export function getErrorMessage(error: any): string {
  */
 export const MODEL_DISPLAY_NAMES: Record<GeminiModel, string> = {
   [GEMINI_MODELS.GEMINI_4_HYDROGEN]: "Gemini 4 Hydrogen",
-  [GEMINI_MODELS.GEMINI_3_8_FLASH]: "Gemini 3.8 Flash",
   [GEMINI_MODELS.GEMINI_3_5_FLASH_LITE]: "Gemini 3.5 Flash-Lite"
 }
 

@@ -50,7 +50,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
     const models = [
         { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
-        { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
         { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen" },
     ]
 
