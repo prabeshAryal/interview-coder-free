@@ -18,6 +18,7 @@ const state = {
   // Window management properties
   mainWindow: null as BrowserWindow | null,
   isWindowVisible: false,
+  ignoreMouseEvents: true,
   windowPosition: null as { x: number; y: number } | null,
   windowSize: null as { width: number; height: number } | null,
   screenWidth: 0,
@@ -119,11 +120,9 @@ export interface IIpcHandlerDeps {
   moveWindowUp: () => void
   moveWindowDown: () => void
   setWindowFocusable: (focusable: boolean) => void
+  setIgnoreMouseEvents: (ignore: boolean) => void
   resetWindowPosition: () => void
 }
-
-// Keep the overlay transparent even if it is shown while capture is underway.
-let screenshotCaptureWindow: BrowserWindow | null = null
 
 // State getter/setter functions
 function getMainWindow(): BrowserWindow | null {
@@ -168,20 +167,10 @@ function clearQueues(): void {
 async function takeScreenshot(): Promise<string> {
   if (!state.mainWindow) throw new Error("No main window available")
   
-  const screenshotPath = await state.screenshotHelper?.takeScreenshot(() => {
-    const win = state.mainWindow
-    if (!win || win.isDestroyed()) return () => {}
+  if (!state.screenshotHelper) throw new Error("Screenshot helper not initialized")
+  // Content protection excludes the overlay without touching its native window.
+  const screenshotPath = await state.screenshotHelper.takeScreenshot()
 
-    // Because setContentProtection(true) (WDA_EXCLUDEFROMCAPTURE) is active,
-    // the window is already excluded from all screenshots natively by Windows DWM.
-    // Toggling opacity (0 -> 1) triggers DWM layer changes that cause the taskbar
-    // to pop up over fullscreen applications. We keep opacity untouched.
-    screenshotCaptureWindow = win
-    return () => {
-      screenshotCaptureWindow = null
-    }
-  }) || ""
-  
   // IMPORTANT: Sync main state view with ScreenshotHelper's view
   // ScreenshotHelper resets to "queue" when taking a new screenshot
   // We must also update main state so ProcessingHelper uses correct view
@@ -282,7 +271,6 @@ function initializeHelpers() {
 // Window management functions
 async function createWindow(): Promise<void> {
   if (state.mainWindow) {
-    if (state.mainWindow.isMinimized()) state.mainWindow.restore()
     return
   }
 
@@ -324,6 +312,8 @@ async function createWindow(): Promise<void> {
     frame: false,
     transparent: true,
     fullscreenable: false,
+    minimizable: false,
+    maximizable: false,
     hasShadow: false,
     backgroundColor: "#00000000",
     focusable: false,
@@ -438,20 +428,25 @@ function handleWindowResize(): void {
 }
 
 function handleWindowClosed(): void {
+  if (dimensionDebounceTimer) clearTimeout(dimensionDebounceTimer)
+  dimensionDebounceTimer = null
   state.mainWindow = null
   state.isWindowVisible = false
   state.windowPosition = null
   state.windowSize = null
 }
 
-// Window focusability control
+// Enforce this in the main process, even for stale renderer requests.
 function setWindowFocusable(focusable: boolean): void {
+  if (focusable) throw new Error("The overlay must remain nonfocusable")
+}
+
+// Retain renderer hit testing across hide/show, but hidden windows never intercept.
+function setIgnoreMouseEvents(ignore: boolean): void {
+  state.ignoreMouseEvents = ignore
   const win = state.mainWindow
   if (win && !win.isDestroyed()) {
-    win.setFocusable(focusable)
-    if (focusable) {
-      win.focus()
-    }
+    win.setIgnoreMouseEvents(ignore || !state.isWindowVisible, { forward: true })
   }
 }
 
@@ -462,9 +457,9 @@ function hideMainWindow(): void {
     const bounds = win.getBounds()
     state.windowPosition = { x: bounds.x, y: bounds.y }
     state.windowSize = { width: bounds.width, height: bounds.height }
-    win.setOpacity(0)
-    win.setIgnoreMouseEvents(true, { forward: true })
     state.isWindowVisible = false
+    win.setIgnoreMouseEvents(true, { forward: true })
+    win.hide()
     win.webContents.send("window-visibility-changed", false)
   }
 }
@@ -472,15 +467,10 @@ function hideMainWindow(): void {
 function showMainWindow(): void {
   const win = state.mainWindow
   if (win && !win.isDestroyed()) {
-    if (state.windowPosition && state.windowSize) {
-      win.setBounds({
-        ...state.windowPosition,
-        ...state.windowSize
-      })
-    }
-    win.setIgnoreMouseEvents(false)
-    if (screenshotCaptureWindow !== win) win.setOpacity(1)
+    // Never restore/show with activation or change layered-window opacity.
+    win.showInactive()
     state.isWindowVisible = true
+    setIgnoreMouseEvents(state.ignoreMouseEvents)
     win.webContents.send("window-visibility-changed", true)
   }
 }
@@ -558,7 +548,7 @@ function resetWindowPosition(): void {
 let dimensionDebounceTimer: NodeJS.Timeout | null = null
 
 function setWindowDimensions(width: number, height: number): void {
-  if (!state.mainWindow?.isDestroyed()) {
+  if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     const isSolutionMode = state.view === "solutions" || state.view === "debug"
     const mode = isSolutionMode ? "solution" : "pill"
 
@@ -605,6 +595,11 @@ function setWindowDimensions(width: number, height: number): void {
     state.currentY = bottomY
 
     if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+      // Cancel stale expansion even when the latest request matches current bounds.
+      if (dimensionDebounceTimer) {
+        clearTimeout(dimensionDebounceTimer)
+        dimensionDebounceTimer = null
+      }
       const currentBounds = state.mainWindow.getBounds()
       if (
         currentBounds.x === centerX &&
@@ -616,10 +611,8 @@ function setWindowDimensions(width: number, height: number): void {
       }
       
       // Debounce window bounds updates to prevent DWM thrashing and taskbar flickering
-      if (dimensionDebounceTimer) {
-        clearTimeout(dimensionDebounceTimer)
-      }
       dimensionDebounceTimer = setTimeout(() => {
+        dimensionDebounceTimer = null
         if (state.mainWindow && !state.mainWindow.isDestroyed()) {
           state.mainWindow.setBounds({
             x: centerX,
@@ -683,6 +676,7 @@ async function initializeApp() {
       moveWindowUp: () => moveWindowVertical((y) => y - state.step),
       moveWindowDown: () => moveWindowVertical((y) => y + state.step),
       setWindowFocusable,
+      setIgnoreMouseEvents,
       resetWindowPosition
     })
     await createWindow()

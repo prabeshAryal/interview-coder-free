@@ -5,6 +5,7 @@ interface ElectronAPI {
   updateContentDimensions: (dimensions: { width: number; height: number }) => Promise<void>
   setWindowDimensions: (width: number, height: number) => Promise<void>
   toggleMainWindow: () => Promise<{ success: boolean; error?: string }>
+  readApiKeyClipboard: () => Promise<string>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
   setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => Promise<void>
   

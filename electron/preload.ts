@@ -52,6 +52,7 @@ interface ElectronAPI {
   getApiKey: () => Promise<{ success: boolean; apiKey?: string; error?: string }>
   getModel: () => Promise<{ success: boolean; model?: string; error?: string }>
   setModel: (model: string) => Promise<{ success: boolean; error?: string }>
+  readApiKeyClipboard: () => Promise<string>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
   setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => Promise<void>
   quitApp: () => void
@@ -250,6 +251,7 @@ const electronAPI = {
   getApiKey: () => ipcRenderer.invoke("get-api-key"),
   getModel: () => ipcRenderer.invoke("get-model"),
   setModel: (model: string) => ipcRenderer.invoke("set-model", model),
+  readApiKeyClipboard: () => ipcRenderer.invoke("read-api-key-clipboard"),
   setWindowFocusable: (focusable: boolean) => ipcRenderer.invoke("set-window-focusable", focusable),
   setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) =>
     ipcRenderer.invoke("set-ignore-mouse-events", ignore, options),

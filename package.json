@@ -3,6 +3,7 @@
   "version": "1.0.18",
   "main": "dist-electron/main.js",
   "scripts": {
+    "test:overlay": "node --test tests/overlay-behavior.cjs",
     "clean": "rimraf dist dist-electron",
     "dev": "cross-env NODE_ENV=production npm run clean && vite build && tsc -p tsconfig.electron.json && node run-electron.js",
     "dev:prod": "cross-env NODE_ENV=production npm run clean && vite build && tsc -p tsconfig.electron.json && node run-electron.js",

@@ -161,3 +161,30 @@ This project is licensed under the **ISC License**.
 Contributions are welcome! Feel free to open issues or submit pull requests to improve the app.
 
 ---
+## Overlay focus checks
+
+The overlay stays nonfocusable, including in settings. To change the API key,
+copy it first, click **Edit**, **Paste Key from Clipboard**, then **Save Key**.
+Keyboard input stays with the foreground application.
+
+Run `npm run test:overlay`, `npx tsc -p tsconfig.electron.json --noEmit`, and
+`npx vite build` for automated checks. The regression tests mock Electron;
+they do not prove native Windows focus or taskbar behavior.
+
+On Windows, test with an F11 fullscreen browser and an auto-hidden taskbar:
+
+1. Keep a browser text field active and repeatedly press Ctrl+H. Verify captures
+   finish and typing continues in the browser without taskbar flashes.
+2. Rapidly toggle Ctrl+B while captures run. Verify the final visibility matches
+   the last toggle and hidden regions never intercept clicks.
+3. Open/close settings rapidly, click language/model controls, paste and save a
+   key, and scroll results. Verify the browser remains foreground and settings
+   do not reopen or expand after being closed.
+4. Repeat on multiple monitors with different scaling, and with capture failing
+   or unavailable. A failed capture should report an error and later requests
+   should still run; it must not launch a fallback capture program.
+
+Windows screenshots use Electron desktopCapturer, select the primary display by
+its display ID, and request its physical pixel dimensions. This avoids starting
+an external executable or PowerShell for each capture. See the
+[Electron capture API](https://www.electronjs.org/docs/latest/api/desktop-capturer/).

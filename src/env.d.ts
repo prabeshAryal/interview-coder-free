@@ -64,6 +64,7 @@ interface ElectronAPI {
   getApiKey: () => Promise<{ success: boolean; apiKey?: string; error?: string }>
   getModel: () => Promise<{ success: boolean; model?: string; error?: string }>
   setModel: (model: string) => Promise<{ success: boolean; error?: string }>
+  readApiKeyClipboard: () => Promise<string>
   setWindowFocusable: (focusable: boolean) => Promise<{ success: boolean; error?: string }>
   setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => Promise<void>
   quitApp: () => void

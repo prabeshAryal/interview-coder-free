@@ -132,7 +132,7 @@ function App() {
     return () => {
       window.removeEventListener("mousemove", handleMouseMove)
       document.removeEventListener("mouseleave", handleMouseLeave)
-      window.electronAPI?.setIgnoreMouseEvents(false)
+      window.electronAPI?.setIgnoreMouseEvents(true, { forward: true })
     }
   }, [])
 

@@ -20,18 +20,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const [isModelOpen, setIsModelOpen] = useState(false)
     const [currentModel, setCurrentModel] = useState("gemini-3.5-flash-lite")
 
-    // Only allow keyboard focus when actually typing in the API key input
-    useEffect(() => {
-        if (isEditing) {
-            window.electronAPI.setWindowFocusable(true)
-        } else {
-            window.electronAPI.setWindowFocusable(false)
-        }
-        return () => {
-            window.electronAPI.setWindowFocusable(false)
-        }
-    }, [isEditing])
-
     const dropdownRef = useRef<HTMLDivElement>(null)
     const modelDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -233,8 +221,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                             <input
                                 type={showApiKey ? "text" : "password"}
                                 value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                placeholder="Enter Gemini API Key"
+                                readOnly
+                                placeholder="Paste a Gemini API key below"
                                 className="w-full bg-white/5 rounded-lg px-3 py-2 text-xs outline-none border border-white/10 focus:border-white/30 pr-8 text-white placeholder-white/30 transition-colors"
                             />
                             <button
@@ -248,6 +236,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                 )}
                             </button>
                         </div>
+                        <button
+                            onClick={async () => {
+                                try {
+                                    setApiKey(await window.electronAPI.readApiKeyClipboard())
+                                } catch (error) {
+                                    console.error("Failed to read clipboard:", error)
+                                }
+                            }}
+                            className="w-full bg-white/10 rounded-lg py-2 text-xs text-white/90 cursor-interactive"
+                        >
+                            Paste Key from Clipboard
+                        </button>
                         <button
                             onClick={handleSaveApiKey}
                             disabled={isSaving}

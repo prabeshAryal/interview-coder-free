@@ -1,6 +1,6 @@
 // ipcHandlers.ts
 
-import { ipcMain, shell, app } from "electron"
+import { ipcMain, shell, app, clipboard } from "electron"
 import { randomBytes } from "crypto"
 import {
   IIpcHandlerDeps
@@ -300,23 +300,22 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     }
   })
 
+  ipcMain.handle("read-api-key-clipboard", () => clipboard.readText().trim())
+
   ipcMain.handle("set-window-focusable", (event, focusable: boolean) => {
     try {
       deps.setWindowFocusable(focusable)
       return { success: true }
     } catch (error) {
       console.error("Error setting window focusable:", error)
-      return { error: "Failed to set window focusable" }
+      return { success: false, error: "The overlay must remain nonfocusable" }
     }
   })
 
   ipcMain.handle(
     "set-ignore-mouse-events",
     (_event, ignore: boolean, options?: { forward?: boolean }) => {
-      const mainWindow = deps.getMainWindow()
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setIgnoreMouseEvents(ignore, options)
-      }
+      deps.setIgnoreMouseEvents(ignore)
     }
   )
 
