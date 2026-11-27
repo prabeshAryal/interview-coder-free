@@ -177,3 +177,26 @@ test('missing primary source and empty thumbnails reject without a process fallb
   assert.equal(writes, 1)
   assert.equal(helper.getScreenshotQueue().length, 1)
 })
+
+test('single screen source is used when Electron does not provide its display ID', async () => {
+  let writtenBuffer
+  const helperModule = load('electron/ScreenshotHelper.ts', {
+    electron: {
+      app: { getPath: () => '/tmp' },
+      screen: { getPrimaryDisplay: () => ({ id: 42, size: { width: 1920, height: 1080 }, scaleFactor: 1 }) },
+      desktopCapturer: { getSources: async () => [{
+        display_id: '',
+        thumbnail: { isEmpty: () => false, toPNG: () => Buffer.from('primary') }
+      }] }
+    },
+    uuid: { v4: () => 'single-screen' },
+    'child_process': { execFile() { throw new Error('Must not spawn a process on Windows') } },
+    'node:fs': {
+      existsSync: () => true,
+      promises: { writeFile: async (_path, data) => { writtenBuffer = data } }
+    }
+  })
+  const helper = new helperModule.ScreenshotHelper()
+  await helper.takeScreenshot()
+  assert.equal(writtenBuffer.toString(), 'primary')
+})

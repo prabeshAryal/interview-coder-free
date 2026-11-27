@@ -109,9 +109,15 @@ export class ScreenshotHelper {
         height: Math.round(display.size.height * display.scaleFactor)
       }
     })
-    const source = sources.find((candidate) => candidate.display_id === String(display.id))
+    const source =
+      sources.find((candidate) => candidate.display_id === String(display.id)) ??
+      (sources.length === 1 ? sources[0] : undefined)
     if (!source || source.thumbnail.isEmpty()) {
-      throw new Error("Primary display capture unavailable")
+      const availableDisplayIds = sources.map((candidate) => candidate.display_id || "(unavailable)")
+      const reason = source ? "primary display thumbnail is empty" : "primary display source not found"
+      throw new Error(
+        `Primary display capture unavailable: ${reason} (display ID ${display.id}; available screen display IDs: ${availableDisplayIds.join(", ") || "none"})`
+      )
     }
     return source.thumbnail.toPNG()
   }
