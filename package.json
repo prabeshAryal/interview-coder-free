@@ -1,6 +1,6 @@
 {
   "name": "windows-defender-v1",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "main": "dist-electron/main.js",
   "scripts": {
     "test:overlay": "node --test tests/overlay-behavior.cjs",
